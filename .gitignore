@@ -1,0 +1,20 @@
+node_modules
+# Keep environment variables out of version control
+
+# Virtual environments
+.env
+venv/
+.venv/
+.env.example
+
+# Ignore Python cache
+__pycache__/
+
+# VSCode settings
+.vscode
+
+build/
+dist/
+__pycache__/
+*.pyc
+models/__pycache__/
