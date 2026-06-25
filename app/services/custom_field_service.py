@@ -7,6 +7,7 @@ from app.core.exceptions import NotFoundError, PermissionDeniedError, Validation
 from app.repositories.base import is_valid_object_id, to_object_id
 from app.repositories.custom_field_repository import CustomFieldRepository
 from app.repositories.list_repository import ListRepository
+from app.repositories.task_repository import TaskRepository
 from app.repositories.project_member_repository import ProjectMemberRepository
 from app.repositories.project_repository import ProjectRepository
 from app.repositories.user_repository import UserRepository
@@ -24,6 +25,7 @@ class CustomFieldService:
         lists: ListRepository,
         users: UserRepository,
         audit: AuditService,
+        tasks: "TaskRepository | None" = None,
     ):
         self.fields = fields
         self.projects = projects
@@ -31,6 +33,7 @@ class CustomFieldService:
         self.lists = lists
         self.users = users
         self.audit = audit
+        self.tasks = tasks
 
     # --- access ---
     async def _space_or_404(self, space_id: str) -> dict[str, Any]:
@@ -82,7 +85,7 @@ class CustomFieldService:
 
     @staticmethod
     def _base(doc: dict[str, Any], *, inherited: bool, location: str | None,
-              created_by_name: str | None) -> dict[str, Any]:
+              created_by_name: str | None, enabled: bool = True) -> dict[str, Any]:
         return {
             "_id": str(doc["_id"]),
             "scope": doc.get("scope"),
@@ -93,6 +96,7 @@ class CustomFieldService:
             "config": doc.get("config", {}),
             "order": doc.get("order", 0),
             "inherited": inherited,
+            "enabled": enabled,            # for inherited fields: is it active for this List?
             "location": location,
             "created_by": str(doc["created_by"]) if doc.get("created_by") else None,
             "created_by_name": created_by_name,
@@ -171,7 +175,8 @@ class CustomFieldService:
         loc = project["name"] if scope == "space" else (await self._list_or_404(str(list_oid)))["name"]
         return self._base(created, inherited=False, location=loc, created_by_name=await resolve(actor.user_id))
 
-    async def list_fields(self, space_id: str, list_id: str | None, actor: ActorContext) -> list[dict[str, Any]]:
+    async def list_fields(self, space_id: str, list_id: str | None, actor: ActorContext,
+                          task_id: str | None = None) -> list[dict[str, Any]]:
         project = await self._space_or_404(space_id)
         await self._assert_member(space_id, project, actor)
         resolve = await self._name_cache()
@@ -180,9 +185,12 @@ class CustomFieldService:
         space_fields = await self.fields.list_for_space(space_id)
         if list_id:
             lst = await self._list_or_404(list_id)
+            # Inherited Space fields can be individually disabled for this List.
+            disabled = {str(x) for x in (lst.get("disabled_fields") or [])}
             # Space fields are inherited (read-only here); then the List's own fields.
             for f in space_fields:
                 out.append(self._base(f, inherited=True, location=project["name"],
+                                      enabled=str(f["_id"]) not in disabled,
                                       created_by_name=await resolve(f.get("created_by"))))
             for f in await self.fields.list_for_list(list_id):
                 out.append(self._base(f, inherited=False, location=lst["name"],
@@ -191,7 +199,67 @@ class CustomFieldService:
             for f in space_fields:
                 out.append(self._base(f, inherited=False, location=project["name"],
                                       created_by_name=await resolve(f.get("created_by"))))
+
+        # --- Bidirectional (paired) relationships ---
+        # A relationship field that lives on List A and is "related to" List B is a
+        # two-way link: it must ALSO appear on List B's tasks (the reverse side), where
+        # it lets you link List A's tasks. So when viewing List B, surface every
+        # relationship field anywhere in the Space whose target is this List, flipping
+        # its search scope back to the owning List.
+        if list_id:
+            have = {f["_id"] for f in out}
+            for f in await self.fields.list_all_in_space(space_id):
+                if str(f["_id"]) in have or f.get("type") != "relationship":
+                    continue
+                cfg = f.get("config") or {}
+                if cfg.get("related_to") == "list" and str(cfg.get("list_id")) == list_id:
+                    owner_list = str(f["list_id"]) if (f.get("scope") == "list" and f.get("list_id")) else None
+                    rev_cfg = {**cfg, "related_to": "list", "list_id": owner_list} if owner_list \
+                        else {**cfg, "related_to": "workspace", "list_id": None}
+                    loc = (await self.lists.find_by_id(owner_list) or {}).get("name") if owner_list else project["name"]
+                    out.append(self._base({**f, "config": rev_cfg}, inherited=True,
+                                          location=loc or project["name"],
+                                          created_by_name=await resolve(f.get("created_by"))))
+                    have.add(str(f["_id"]))
+
+            # Also surface any relationship field this specific task is already linked
+            # under but that isn't otherwise shown (e.g. workspace-scoped fields).
+            if task_id and is_valid_object_id(task_id) and self.tasks:
+                task = await self.tasks.find_by_id(task_id)
+                for fid in list((task or {}).get("custom_fields", {}) or {}):
+                    if fid in have or not is_valid_object_id(fid):
+                        continue
+                    f = await self.fields.find_by_id(fid)
+                    if not f or f.get("is_deleted") or f.get("type") != "relationship":
+                        continue
+                    if str(f.get("space_id")) != space_id:
+                        continue
+                    loc = (await self.lists.find_by_id(str(f["list_id"])) or {}).get("name") if f.get("list_id") else project["name"]
+                    out.append(self._base(f, inherited=True, location=loc or project["name"],
+                                          created_by_name=await resolve(f.get("created_by"))))
+                    have.add(fid)
         return out
+
+    async def set_enabled_for_list(self, field_id: str, list_id: str, enabled: bool,
+                                   actor: ActorContext) -> None:
+        """Enable/disable an inherited (Space-scoped) custom field for a single List.
+        Disabling adds the field id to the List's `disabled_fields`; enabling removes it."""
+        field = await self._field_or_404(field_id)
+        if field.get("scope") != "space":
+            raise ValidationError("Only inherited (Space) fields can be toggled per List")
+        space_id = str(field["space_id"])
+        project = await self._space_or_404(space_id)
+        await self._assert_member(space_id, project, actor)
+        lst = await self._list_or_404(list_id)
+        if str(lst["space_id"]) != space_id:
+            raise ValidationError("List does not belong to this field's Space")
+
+        disabled = {str(x) for x in (lst.get("disabled_fields") or [])}
+        if enabled:
+            disabled.discard(field_id)
+        else:
+            disabled.add(field_id)
+        await self.lists.update_by_id(list_id, {"disabled_fields": sorted(disabled)})
 
     async def list_all_fields(self, space_id: str, actor: ActorContext) -> list[dict[str, Any]]:
         """Every field anywhere under a Space (space-scoped + all Lists), with location."""

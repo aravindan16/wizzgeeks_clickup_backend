@@ -1,0 +1,18 @@
+services:
+  wizzgeeks-clickup-backend:
+    container_name: clickup-backend
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wizzgeeks-clickup/backend
+    restart: unless-stopped
+    ports:
+      - "7302:7302"
+    env_file:
+      - .env
+    networks:
+      - shared-app-network
+
+networks:
+  shared-app-network:
+    external: true

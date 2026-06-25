@@ -18,6 +18,7 @@ from app.repositories.project_repository import ProjectRepository
 from app.repositories.status_history_repository import StatusHistoryRepository
 from app.repositories.task_assignment_repository import TaskAssignmentRepository
 from app.repositories.list_repository import ListRepository
+from app.repositories.custom_field_repository import CustomFieldRepository
 from app.repositories.task_repository import TaskRepository
 from app.repositories.user_repository import UserRepository
 from app.repositories.worklog_repository import WorklogRepository
@@ -64,6 +65,7 @@ class TaskService:
         notifications: NotificationService,
         worklogs: WorklogRepository,
         lists: "ListRepository | None" = None,
+        custom_fields: "CustomFieldRepository | None" = None,
     ):
         self.tasks = tasks
         self.projects = projects
@@ -75,6 +77,75 @@ class TaskService:
         self.notifications = notifications
         self.worklogs = worklogs
         self.lists = lists
+        self.custom_fields = custom_fields
+
+    async def _sync_relationship_reverse(self, task_id: str, before: dict, after: dict) -> None:
+        """Keep relationship custom fields bidirectional: when this task links to
+        another, the linked task stores the reverse under the same field id (and
+        vice-versa on unlink). No-ops if the custom-field repo isn't wired."""
+        if self.custom_fields is None:
+            return
+        before = before or {}
+        after = after or {}
+        for fid in set(before) | set(after):
+            if not is_valid_object_id(fid):
+                continue
+            field = await self.custom_fields.find_by_id(fid)
+            if not field or field.get("type") != "relationship":
+                continue
+            old_ids = {str(x) for x in (before.get(fid) or []) if x}
+            new_ids = {str(x) for x in (after.get(fid) or []) if x}
+            for other_id in (new_ids - old_ids):   # newly linked → add reverse
+                await self._reverse_edit(other_id, fid, task_id, add=True)
+            for other_id in (old_ids - new_ids):   # unlinked → remove reverse
+                await self._reverse_edit(other_id, fid, task_id, add=False)
+
+    async def _heal_reverse_links(self, task: dict[str, Any]) -> None:
+        """Make relationships symmetric on read: if another task links to THIS task
+        under a relationship field, mirror that link onto this task (so both sides
+        show it). Self-heals links made before bidirectional sync existed."""
+        if self.custom_fields is None:
+            return
+        tid = str(task["_id"])
+        space_id = str(task["project_id"])
+        rel_fields = [f for f in await self.custom_fields.list_all_in_space(space_id)
+                      if f.get("type") == "relationship"]
+        if not rel_fields:
+            return
+        cf = dict(task.get("custom_fields") or {})
+        changed = False
+        for f in rel_fields:
+            fid = str(f["_id"])
+            reverse = await self.tasks.find_many(
+                {f"custom_fields.{fid}": tid, "is_deleted": {"$ne": True}}, limit=500)
+            rev_ids = [str(r["_id"]) for r in reverse]
+            cur = [str(x) for x in (cf.get(fid) or [])]
+            merged = cur + [r for r in rev_ids if r not in cur]
+            if len(merged) != len(cur):
+                cf[fid] = merged
+                changed = True
+        if changed:
+            await self.tasks.update_by_id(tid, {"custom_fields": cf})
+            task["custom_fields"] = cf
+
+    async def _reverse_edit(self, other_id: str, fid: str, this_id: str, *, add: bool) -> None:
+        if not is_valid_object_id(other_id):
+            return
+        other = await self.tasks.find_by_id(other_id)
+        if not other or other.get("is_deleted"):
+            return
+        cf = dict(other.get("custom_fields") or {})
+        cur = [str(x) for x in (cf.get(fid) or []) if x]
+        if add:
+            if this_id in cur:
+                return
+            cur.append(this_id)
+        else:
+            if this_id not in cur:
+                return
+            cur = [x for x in cur if x != this_id]
+        cf[fid] = cur
+        await self.tasks.update_by_id(other_id, {"custom_fields": cf, "updated_at": utcnow()})
 
     async def _notify_assignee(self, assignee_id: str, actor: ActorContext, task: dict[str, Any]) -> None:
         if not assignee_id or assignee_id == actor.user_id:
@@ -171,8 +242,18 @@ class TaskService:
         if init_status not in allowed:
             raise ValidationError(f"Invalid status '{init_status}' for this list/space")
 
-        seq = await self.projects.next_task_seq(project_id)
-        key = f"{project['key']}-{seq}"
+        # Task IDs are derived from the List's key (e.g. FE-1). Fall back to the
+        # Space key only if the list has none (legacy lists / no list).
+        list_key = None
+        if list_oid and self.lists:
+            lst_doc = await self.lists.find_by_id(list_oid)
+            list_key = (lst_doc or {}).get("key")
+        if list_key:
+            seq = await self.lists.next_task_seq(list_oid)
+            key = f"{list_key}-{seq}"
+        else:
+            seq = await self.projects.next_task_seq(project_id)
+            key = f"{project['key']}-{seq}"
         now = utcnow()
         doc = {
             "project_id": to_object_id(project_id),
@@ -216,11 +297,14 @@ class TaskService:
 
         await self.audit.log(actor_id=actor.user_id, action="task.created", entity_type="task",
                              entity_id=tid, metadata={"key": key, "project_id": project_id}, ip=actor.ip)
+        # Mirror any relationship links onto the linked tasks (bidirectional).
+        await self._sync_relationship_reverse(tid, {}, created.get("custom_fields") or {})
         return _serialize(created)
 
     async def get_task(self, task_id: str, actor: ActorContext) -> dict[str, Any]:
         task = await self._get_task_or_404(task_id)
         await self._assert_project_access(str(task["project_id"]), actor)
+        await self._heal_reverse_links(task)   # keep relationships symmetric on both sides
         return _serialize(task)
 
     async def list_tasks(
@@ -274,6 +358,9 @@ class TaskService:
         await self.audit.log(actor_id=actor.user_id, action="task.updated", entity_type="task",
                              entity_id=task_id,
                              metadata={"fields": list(changes.keys()), "changes": changes}, ip=actor.ip)
+        # Keep relationship custom fields bidirectional when they change.
+        if "custom_fields" in update:
+            await self._sync_relationship_reverse(task_id, task.get("custom_fields") or {}, update["custom_fields"])
         return _serialize(updated)
 
     async def change_status(
@@ -311,11 +398,16 @@ class TaskService:
     async def assign(self, task_id: str, assignee_id: str | None, actor: ActorContext) -> dict[str, Any]:
         task = await self._get_task_or_404(task_id)
         project_id = str(task["project_id"])
-        await self._assert_project_access(project_id, actor)
+        # TODO: Add role-based permission validation in a future phase.
+        # Currently, all authenticated users can assign/unassign tasks, so the actor
+        # access gate (`_assert_project_access`) is intentionally skipped here.
+        # Re-enable it (or a dedicated `task.assign` check) when permissions return.
 
         now = utcnow()
         await self.assignments.deactivate_active(task_id, now)
         if assignee_id:
+            # Validation only (NOT a permission gate): the assignee must be a real
+            # member of this space, so a task can be assigned to any workspace member.
             await self._ensure_assignee_member(project_id, assignee_id, actor)
             await self.assignments.add(task_id=task_id, assignee_id=assignee_id,
                                        assigned_by=actor.user_id, when=now)

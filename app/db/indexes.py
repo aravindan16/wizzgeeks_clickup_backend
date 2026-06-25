@@ -102,14 +102,6 @@ async def ensure_indexes() -> None:
         [("created_at", ASCENDING)], expireAfterSeconds=90 * 24 * 3600, name="notif_ttl"
     )
 
-    # recent_items (per-user recently visited)
-    await db.recent_items.create_index(
-        [("user_id", ASCENDING), ("path", ASCENDING)], unique=True, name="recent_user_path"
-    )
-    await db.recent_items.create_index(
-        [("user_id", ASCENDING), ("visited_at", DESCENDING)], name="recent_user_time"
-    )
-
     # --- Multi-tenancy ---
     # organizations
     await db.organizations.create_index([("slug", ASCENDING)], unique=True, name="uniq_org_slug")
@@ -138,15 +130,6 @@ async def ensure_indexes() -> None:
     await db.workspace_invitations.create_index([("token_hash", ASCENDING)], name="invite_token")
     await db.workspace_invitations.create_index(
         [("organization_id", ASCENDING), ("email", ASCENDING)], name="invite_org_email"
-    )
-
-    # starred_items (per-user stars)
-    await db.starred_items.create_index(
-        [("user_id", ASCENDING), ("entity_type", ASCENDING), ("entity_id", ASCENDING)],
-        unique=True, name="starred_user_entity",
-    )
-    await db.starred_items.create_index(
-        [("user_id", ASCENDING), ("starred_at", DESCENDING)], name="starred_user_time"
     )
 
     # activity_logs (audit trail)

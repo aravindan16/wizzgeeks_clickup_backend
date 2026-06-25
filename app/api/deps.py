@@ -38,7 +38,6 @@ from app.services.comment_service import CommentService
 from app.services.daily_update_service import DailyUpdateService
 from app.services.dashboard_service import DashboardService
 from app.services.notification_service import NotificationService
-from app.services.report_service import ReportService
 from app.services.custom_field_service import CustomFieldService
 from app.services.list_service import ListService
 from app.services.project_service import ProjectService
@@ -160,8 +159,9 @@ def get_custom_field_service(
     lists: Annotated[ListRepository, Depends(get_list_repo)],
     users: Annotated[UserRepository, Depends(get_user_repo)],
     audit: Annotated[AuditService, Depends(get_audit_service)],
+    tasks: Annotated[TaskRepository, Depends(get_task_repo)],
 ) -> CustomFieldService:
-    return CustomFieldService(fields, projects, members, lists, users, audit)
+    return CustomFieldService(fields, projects, members, lists, users, audit, tasks)
 
 
 def get_comment_repo(db: DbDep) -> CommentRepository:
@@ -191,8 +191,10 @@ def get_task_service(
     notifications: Annotated[NotificationService, Depends(get_notification_service)],
     worklogs: Annotated[WorklogRepository, Depends(get_worklog_repo)],
     lists: Annotated[ListRepository, Depends(get_list_repo)],
+    custom_fields: Annotated[CustomFieldRepository, Depends(get_custom_field_repo)],
 ) -> TaskService:
-    return TaskService(tasks, projects, members, users, history, assignments, audit, notifications, worklogs, lists)
+    return TaskService(tasks, projects, members, users, history, assignments, audit, notifications, worklogs, lists,
+                       custom_fields)
 
 
 def get_comment_service(
@@ -221,9 +223,6 @@ def get_daily_update_service(
 def get_dashboard_service(db: DbDep) -> DashboardService:
     return DashboardService(db)
 
-
-def get_report_service(db: DbDep) -> ReportService:
-    return ReportService(db)
 
 
 def get_auth_service(

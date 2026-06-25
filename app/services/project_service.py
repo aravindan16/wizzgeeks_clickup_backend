@@ -70,9 +70,14 @@ class ProjectService:
 
     # --- CRUD ---
     async def create_project(self, data: dict[str, Any], actor: ActorContext) -> dict[str, Any]:
-        key = data["key"].upper()
-        if await self.projects.find_by_key(key):
-            raise ConflictError(f"Project key '{key}' already exists")
+        # The Space key is internal now (task IDs come from List keys), so we never
+        # reject a Space on a key clash — just make it unique automatically.
+        base = (data.get("key") or "SP").upper()
+        key = base
+        n = 1
+        while await self.projects.find_by_key(key):
+            n += 1
+            key = f"{base}{n}"
 
         now = utcnow()
         doc = {
@@ -231,8 +236,10 @@ class ProjectService:
 
     async def soft_delete(self, project_id: str, actor: ActorContext) -> None:
         project = await self._get_or_404(project_id)
-        if not (actor.has("project.delete") or self._is_owner(project, actor)):
-            raise PermissionDeniedError("Only the space owner or an admin can delete this space")
+        # Only the person who created the space (its owner) may delete it.
+        # TODO: If permissions return, optionally also allow an admin (project.delete).
+        if not self._is_owner(project, actor):
+            raise PermissionDeniedError("Only the person who created this space can delete it")
         await self.projects.soft_delete_by_id(project_id, when=utcnow())
         await self.audit.log(
             actor_id=actor.user_id, action="project.deleted", entity_type="project",
@@ -240,16 +247,21 @@ class ProjectService:
         )
 
     # --- members ---
-    def _can_manage_members(self, project: dict[str, Any], actor: ActorContext) -> bool:
-        return actor.has("project.member.manage") or self._is_owner(project, actor)
+    async def _can_manage_members(self, project_id: str, project: dict[str, Any], actor: ActorContext) -> bool:
+        """TODO: Re-introduce role-based member management in a future phase.
+        For now, ANY member of the space (or its owner) can add / update / remove
+        members — no specific role/permission is required."""
+        if self._is_owner(project, actor):
+            return True
+        return bool(actor.user_id and await self.members.find_active(project_id, actor.user_id))
 
     async def add_member(
         self, project_id: str, project_role: str, actor: ActorContext,
         *, user_id: str | None = None, email: str | None = None,
     ) -> dict[str, Any]:
         project = await self._get_or_404(project_id)
-        if not self._can_manage_members(project, actor):
-            raise PermissionDeniedError("Only the space owner or a lead can manage members")
+        if not await self._can_manage_members(project_id, project, actor):
+            raise PermissionDeniedError("You must be a member of this space to add members")
 
         # Resolve an email to an existing user (server-side — works even when the
         # caller can't browse the user directory).
@@ -291,8 +303,8 @@ class ProjectService:
         self, project_id: str, user_id: str, project_role: str, actor: ActorContext
     ) -> dict[str, Any]:
         project = await self._get_or_404(project_id)
-        if not self._can_manage_members(project, actor):
-            raise PermissionDeniedError("Only the space owner or a lead can manage members")
+        if not await self._can_manage_members(project_id, project, actor):
+            raise PermissionDeniedError("You must be a member of this space to manage members")
         member = await self.members.find_active(project_id, user_id)
         if not member:
             raise NotFoundError("Member not found in project")
@@ -315,8 +327,8 @@ class ProjectService:
 
     async def remove_member(self, project_id: str, user_id: str, actor: ActorContext) -> None:
         project = await self._get_or_404(project_id)
-        if not self._can_manage_members(project, actor):
-            raise PermissionDeniedError("Only the space owner or a lead can manage members")
+        if not await self._can_manage_members(project_id, project, actor):
+            raise PermissionDeniedError("You must be a member of this space to manage members")
         removed = await self.members.remove(project_id, user_id, utcnow())
         if not removed:
             raise NotFoundError("Member not found in project")
