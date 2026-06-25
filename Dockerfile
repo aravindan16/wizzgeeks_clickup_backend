@@ -15,11 +15,11 @@ RUN pip install --no-cache-dir -r requirements.txt gunicorn==22.0.0
 
 COPY . .
 
-EXPOSE 8000
+EXPOSE 7302
 
 # Production: gunicorn managing uvicorn workers. Override WEB_CONCURRENCY as needed.
 ENV WEB_CONCURRENCY=4
 CMD ["gunicorn", "app.main:app", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
-     "--bind", "0.0.0.0:8000", \
+     "--bind", "0.0.0.0:7302", \
      "--workers", "4", "--timeout", "120"]

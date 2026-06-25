@@ -1,42 +1,17 @@
 services:
-  backend:
-    build: .
-    container_name: dat_backend
+  wizzgeeks-clickup-backend:
+    container_name: clickup-backend
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wizzgeeks-clickup/backend
     restart: unless-stopped
+    ports:
+      - "7302:7302"
     env_file:
       - .env
-    environment:
-      - MONGODB_URI=mongodb://mongo:27017
-    depends_on:
-      - mongo
-      - redis
-    ports:
-      - "7302:8000"
     networks:
       - shared-app-network
-
-  mongo:
-    image: mongo:7
-    container_name: dat_mongo
-    restart: unless-stopped
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
-    networks:
-      - shared-app-network
-
-  redis:
-    image: redis:7-alpine
-    container_name: dat_redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    networks:
-      - shared-app-network
-
-volumes:
-  mongo_data:
 
 networks:
   shared-app-network:
