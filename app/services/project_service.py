@@ -70,9 +70,14 @@ class ProjectService:
 
     # --- CRUD ---
     async def create_project(self, data: dict[str, Any], actor: ActorContext) -> dict[str, Any]:
-        key = data["key"].upper()
-        if await self.projects.find_by_key(key):
-            raise ConflictError(f"Project key '{key}' already exists")
+        # The Space key is internal now (task IDs come from List keys), so we never
+        # reject a Space on a key clash — just make it unique automatically.
+        base = (data.get("key") or "SP").upper()
+        key = base
+        n = 1
+        while await self.projects.find_by_key(key):
+            n += 1
+            key = f"{base}{n}"
 
         now = utcnow()
         doc = {

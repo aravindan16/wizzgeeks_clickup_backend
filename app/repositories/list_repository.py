@@ -23,3 +23,12 @@ class ListRepository(BaseRepository):
             limit=1, sort=[("order", 1), ("created_at", 1)],
         )
         return rows[0] if rows else None
+
+    async def next_task_seq(self, list_id: Any) -> int:
+        """Atomically increment and return the List's task counter (for task keys)."""
+        doc = await self.collection.find_one_and_update(
+            {"_id": to_object_id(list_id)},
+            {"$inc": {"task_counter": 1}},
+            return_document=True,
+        )
+        return int(doc.get("task_counter", 0)) if doc else 0

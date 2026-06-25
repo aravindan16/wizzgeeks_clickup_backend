@@ -242,8 +242,18 @@ class TaskService:
         if init_status not in allowed:
             raise ValidationError(f"Invalid status '{init_status}' for this list/space")
 
-        seq = await self.projects.next_task_seq(project_id)
-        key = f"{project['key']}-{seq}"
+        # Task IDs are derived from the List's key (e.g. FE-1). Fall back to the
+        # Space key only if the list has none (legacy lists / no list).
+        list_key = None
+        if list_oid and self.lists:
+            lst_doc = await self.lists.find_by_id(list_oid)
+            list_key = (lst_doc or {}).get("key")
+        if list_key:
+            seq = await self.lists.next_task_seq(list_oid)
+            key = f"{list_key}-{seq}"
+        else:
+            seq = await self.projects.next_task_seq(project_id)
+            key = f"{project['key']}-{seq}"
         now = utcnow()
         doc = {
             "project_id": to_object_id(project_id),
