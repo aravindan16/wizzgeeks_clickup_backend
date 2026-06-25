@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from app.api.deps import (
     CurrentUser,
     get_comment_service,
+    get_current_user,
     get_task_service,
     make_actor,
     require,
@@ -137,7 +138,10 @@ async def assign_task(
     payload: AssignRequest,
     request: Request,
     service: TaskServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("task.assign"))],
+    # TODO: Re-introduce role-based permission validation in a future phase
+    # (was: Depends(require("task.assign"))). For now any authenticated user
+    # may assign/unassign tasks — only login is required.
+    actor: Annotated[CurrentUser, Depends(get_current_user)],
 ):
     return await service.assign(task_id, payload.assignee_id, make_actor(actor, request))
 

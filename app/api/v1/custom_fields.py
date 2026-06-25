@@ -10,6 +10,7 @@ from app.schemas.custom_field import (
     CustomFieldResponse,
     CustomFieldUpdate,
     DuplicateFieldRequest,
+    ListToggleRequest,
     MoveFieldRequest,
     ReorderFieldsRequest,
 )
@@ -27,12 +28,13 @@ async def list_fields(
     actor: Annotated[CurrentUser, Depends(require("project.read"))],
     space_id: str = Query(...),
     list_id: str | None = None,
+    task_id: str | None = None,
     all: bool = False,
 ):
     actor_ctx = make_actor(actor, request)
     if all:
         return await service.list_all_fields(space_id, actor_ctx)
-    return await service.list_fields(space_id, list_id, actor_ctx)
+    return await service.list_fields(space_id, list_id, actor_ctx, task_id=task_id)
 
 
 @router.get("/reusable", response_model=list[CustomFieldResponse])
@@ -76,6 +78,19 @@ async def reorder_fields(
 ):
     await service.reorder_fields(payload.ids, make_actor(actor, request))
     return MessageResponse(message="Custom fields reordered")
+
+
+@router.post("/{field_id}/list-toggle", response_model=MessageResponse)
+async def toggle_field_for_list(
+    field_id: str,
+    payload: ListToggleRequest,
+    request: Request,
+    service: CFServiceDep,
+    actor: Annotated[CurrentUser, Depends(require("task.create"))],
+):
+    """Enable/disable an inherited Space field for one List."""
+    await service.set_enabled_for_list(field_id, payload.list_id, payload.enabled, make_actor(actor, request))
+    return MessageResponse(message="Custom field updated for list")
 
 
 @router.post("/{field_id}/move", response_model=CustomFieldResponse)

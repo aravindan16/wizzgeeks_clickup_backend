@@ -59,6 +59,11 @@ class ReorderFieldsRequest(BaseModel):
     ids: list[str]  # field ids in their new display order (within one scope)
 
 
+class ListToggleRequest(BaseModel):
+    list_id: str
+    enabled: bool  # enable (show) or disable (hide) an inherited field for this List
+
+
 class CustomFieldResponse(ORMModel):
     id: str = Field(alias="_id")
     scope: str
@@ -69,6 +74,7 @@ class CustomFieldResponse(ORMModel):
     config: dict[str, Any] = {}
     order: int = 0
     inherited: bool = False           # true when shown in a List but owned by the Space
+    enabled: bool = True              # for inherited fields: is it active for this List?
     location: str | None = None       # human label: Space or List name
     created_by: str | None = None
     created_by_name: str | None = None
