@@ -38,7 +38,6 @@ from app.services.comment_service import CommentService
 from app.services.daily_update_service import DailyUpdateService
 from app.services.dashboard_service import DashboardService
 from app.services.notification_service import NotificationService
-from app.services.report_service import ReportService
 from app.services.custom_field_service import CustomFieldService
 from app.services.list_service import ListService
 from app.services.project_service import ProjectService
@@ -224,9 +223,6 @@ def get_daily_update_service(
 def get_dashboard_service(db: DbDep) -> DashboardService:
     return DashboardService(db)
 
-
-def get_report_service(db: DbDep) -> ReportService:
-    return ReportService(db)
 
 
 def get_auth_service(
