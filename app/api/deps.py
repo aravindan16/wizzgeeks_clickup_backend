@@ -38,6 +38,7 @@ from app.services.comment_service import CommentService
 from app.services.daily_update_service import DailyUpdateService
 from app.services.dashboard_service import DashboardService
 from app.services.user_dashboard_service import UserDashboardService
+from app.services.saved_filter_service import SavedFilterService
 from app.services.notification_service import NotificationService
 from app.services.custom_field_service import CustomFieldService
 from app.services.list_service import ListService
@@ -227,6 +228,10 @@ def get_dashboard_service(db: DbDep) -> DashboardService:
 
 def get_user_dashboard_service(db: DbDep) -> UserDashboardService:
     return UserDashboardService(db)
+
+
+def get_saved_filter_service(db: DbDep) -> SavedFilterService:
+    return SavedFilterService(db)
 
 
 
