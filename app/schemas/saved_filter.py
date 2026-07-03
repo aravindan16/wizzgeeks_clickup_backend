@@ -1,7 +1,8 @@
 """Saved-filter (Filters page) request/response DTOs.
 
 A saved filter persists the ClickUp-style filter builder: `cards` (the AND/OR
-rule tree) plus `conj` (the join between cards). Owner-scoped and personal.
+rule tree) plus `conj` (the join between cards). Owned by a user and optionally
+shared with members (owner ∪ members can view/use it).
 """
 from typing import Any
 
@@ -29,9 +30,25 @@ class SavedFilterResponse(ORMModel):
     conj: str = "AND"
     owner_id: str | None = None
     owner_name: str | None = None
+    member_ids: list[str] = []
     created_at: Any | None = None
     updated_at: Any | None = None
 
 
 class SavedFilterList(ORMModel):
     items: list[SavedFilterResponse]
+
+
+class FilterMemberAdd(BaseModel):
+    user_id: str
+
+
+class FilterMember(ORMModel):
+    user_id: str
+    full_name: str | None = None
+    email: str | None = None
+    is_owner: bool = False
+
+
+class FilterMemberList(ORMModel):
+    items: list[FilterMember]
