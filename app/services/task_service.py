@@ -2,7 +2,10 @@
 watchers, worklog, metrics — with project-member access enforcement."""
 from typing import Any
 
+from pymongo.errors import DuplicateKeyError
+
 from app.core.exceptions import (
+    ConflictError,
     NotFoundError,
     PermissionDeniedError,
     ValidationError,
@@ -248,16 +251,19 @@ class TaskService:
         if list_oid and self.lists:
             lst_doc = await self.lists.find_by_id(list_oid)
             list_key = (lst_doc or {}).get("key")
-        if list_key:
-            seq = await self.lists.next_task_seq(list_oid)
-            key = f"{list_key}-{seq}"
-        else:
-            seq = await self.projects.next_task_seq(project_id)
-            key = f"{project['key']}-{seq}"
+
+        # Task `key` is globally unique. When a List/Space shares its key prefix with
+        # another (or old soft-deleted tasks still hold a key), the next sequence can
+        # collide — so allocate the key with retry, advancing the counter until free.
+        async def _next_key() -> str:
+            if list_key:
+                return f"{list_key}-{await self.lists.next_task_seq(list_oid)}"
+            return f"{project['key']}-{await self.projects.next_task_seq(project_id)}"
+
         now = utcnow()
         doc = {
             "project_id": to_object_id(project_id),
-            "key": key,
+            "key": await _next_key(),
             "title": data["title"],
             "description": data.get("description"),
             "type": data.get("type", "task"),
@@ -283,7 +289,16 @@ class TaskService:
             "created_at": now,
             "updated_at": now,
         }
-        created = await self.tasks.insert_one(doc)
+        created = None
+        for _ in range(50):
+            try:
+                created = await self.tasks.insert_one(doc)
+                break
+            except DuplicateKeyError:
+                doc["key"] = await _next_key()  # key already taken → try the next sequence
+        if created is None:
+            raise ConflictError("Could not allocate a unique task key")
+        key = doc["key"]
         tid = str(created["_id"])
 
         await self.history.record({
