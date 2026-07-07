@@ -33,6 +33,9 @@ async def ensure_indexes() -> None:
         [("expires_at", ASCENDING)], expireAfterSeconds=0, name="rt_ttl"
     )
 
+    # labels (global catalog — unique by lowercased name)
+    await db.labels.create_index([("name_lower", ASCENDING)], unique=True, name="uniq_label_name")
+
     # projects
     await db.projects.create_index([("key", ASCENDING)], unique=True, name="uniq_project_key")
     await db.projects.create_index([("status", ASCENDING)], name="proj_status")
