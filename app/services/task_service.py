@@ -362,6 +362,9 @@ class TaskService:
                            "labels", "estimate_hours", "custom_fields"):
             if data.get(field_name) is not None:
                 update[field_name] = data[field_name]
+        if data.get("reporter_id") is not None:
+            rid = data["reporter_id"]
+            update["reporter_id"] = to_object_id(rid) if rid else None
         updated = await self.tasks.update_by_id(task_id, update)
         changes = {k: v for k, v in update.items() if k != "updated_at"}
         await self.audit.log(actor_id=actor.user_id, action="task.updated", entity_type="task",
