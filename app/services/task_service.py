@@ -548,8 +548,26 @@ class TaskService:
         task = await self._get_task_or_404(task_id)
         await self._assert_project_access(str(task["project_id"]), actor)
         await self.tasks.soft_delete_by_id(task_id, when=utcnow())
+        # Remove this task's id from every relationship custom field that links it, so
+        # no card/detail keeps showing a stale link to a deleted task.
+        await self._cleanup_relationship_refs(task)
         await self.audit.log(actor_id=actor.user_id, action="task.deleted", entity_type="task",
                              entity_id=task_id, ip=actor.ip)
+
+    async def _cleanup_relationship_refs(self, task: dict[str, Any]) -> None:
+        if self.custom_fields is None:
+            return
+        tid = str(task["_id"])
+        space_id = str(task["project_id"])
+        rel_fields = [f for f in await self.custom_fields.list_all_in_space(space_id)
+                      if f.get("type") == "relationship"]
+        for f in rel_fields:
+            fid = str(f["_id"])
+            refs = await self.tasks.find_many({f"custom_fields.{fid}": tid, "is_deleted": {"$ne": True}}, limit=1000)
+            for r in refs:
+                cf = dict(r.get("custom_fields") or {})
+                cf[fid] = [str(x) for x in (cf.get(fid) or []) if str(x) != tid]
+                await self.tasks.update_by_id(str(r["_id"]), {"custom_fields": cf})
 
     # --- activity (audit feed: created + every update) ---
     async def task_activity(self, task_id: str, actor: ActorContext) -> list[dict[str, Any]]:
