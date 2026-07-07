@@ -245,19 +245,13 @@ class TaskService:
         if init_status not in allowed:
             raise ValidationError(f"Invalid status '{init_status}' for this list/space")
 
-        # Task IDs are derived from the List's key (e.g. FE-1). Fall back to the
-        # Space key only if the list has none (legacy lists / no list).
-        list_key = None
-        if list_oid and self.lists:
-            lst_doc = await self.lists.find_by_id(list_oid)
-            list_key = (lst_doc or {}).get("key")
-
-        # Task `key` is globally unique. When a List/Space shares its key prefix with
-        # another (or old soft-deleted tasks still hold a key), the next sequence can
-        # collide — so allocate the key with retry, advancing the counter until free.
+        # Task IDs use the SPACE key as a single shared prefix (e.g. WR-1), common to
+        # every task in the Space regardless of which List it lives in — one running
+        # sequence per Space, not per List.
+        # Task `key` is globally unique. When another Space shares the same key prefix
+        # (or old soft-deleted tasks still hold a key), the next sequence can collide —
+        # so allocate the key with retry, advancing the counter until free.
         async def _next_key() -> str:
-            if list_key:
-                return f"{list_key}-{await self.lists.next_task_seq(list_oid)}"
             return f"{project['key']}-{await self.projects.next_task_seq(project_id)}"
 
         now = utcnow()
