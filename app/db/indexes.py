@@ -33,12 +33,6 @@ async def ensure_indexes() -> None:
         [("expires_at", ASCENDING)], expireAfterSeconds=0, name="rt_ttl"
     )
 
-    # password_resets
-    await db.password_resets.create_index([("token_hash", ASCENDING)], name="pr_token")
-    await db.password_resets.create_index(
-        [("expires_at", ASCENDING)], expireAfterSeconds=0, name="pr_ttl"
-    )
-
     # projects
     await db.projects.create_index([("key", ASCENDING)], unique=True, name="uniq_project_key")
     await db.projects.create_index([("status", ASCENDING)], name="proj_status")

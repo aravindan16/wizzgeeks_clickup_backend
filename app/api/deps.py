@@ -21,7 +21,6 @@ from app.repositories.daily_update_repository import DailyUpdateRepository
 from app.repositories.notification_repository import NotificationRepository
 from app.repositories.project_member_repository import ProjectMemberRepository
 from app.repositories.project_repository import ProjectRepository
-from app.repositories.reset_repository import PasswordResetRepository
 from app.repositories.role_repository import RoleRepository
 from app.repositories.custom_field_repository import CustomFieldRepository
 from app.repositories.list_repository import ListRepository
@@ -68,10 +67,6 @@ def get_role_repo(db: DbDep) -> RoleRepository:
 
 def get_token_repo(db: DbDep) -> RefreshTokenRepository:
     return RefreshTokenRepository(db)
-
-
-def get_reset_repo(db: DbDep) -> PasswordResetRepository:
-    return PasswordResetRepository(db)
 
 
 def get_audit_repo(db: DbDep) -> ActivityLogRepository:
@@ -239,9 +234,8 @@ def get_auth_service(
     users: Annotated[UserRepository, Depends(get_user_repo)],
     roles: Annotated[RoleService, Depends(get_role_service)],
     tokens: Annotated[RefreshTokenRepository, Depends(get_token_repo)],
-    resets: Annotated[PasswordResetRepository, Depends(get_reset_repo)],
 ) -> AuthService:
-    return AuthService(users, roles, tokens, resets)
+    return AuthService(users, roles, tokens)
 
 
 # --- Current user / RBAC ---

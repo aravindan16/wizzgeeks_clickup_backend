@@ -7,14 +7,11 @@ from app.api.deps import CurrentUserDep, get_auth_service
 from app.core.config import settings
 from app.schemas.auth import (
     ChangePasswordRequest,
-    ForgotPasswordRequest,
-    ForgotPasswordResponse,
     GoogleSignInRequest,
     LoginRequest,
     RefreshResponse,
     RegisterRequest,
     RegisterResponse,
-    ResetPasswordRequest,
     TokenResponse,
     UserPublic,
     VerifyEmailRequest,
@@ -86,24 +83,6 @@ async def me(current: CurrentUserDep):
         department=current.raw.get("department"),
         avatar_url=current.raw.get("avatar_url"),
     )
-
-
-@router.post("/forgot-password", response_model=ForgotPasswordResponse)
-async def forgot_password(payload: ForgotPasswordRequest, service: AuthServiceDep):
-    raw_token = await service.forgot_password(payload.email)
-    # When email is enabled, the link is emailed and the token is NOT returned.
-    # Otherwise (dev) the token is returned inline to ease testing.
-    expose = raw_token if not settings.EMAIL_ENABLED else None
-    return ForgotPasswordResponse(
-        message="If the account exists, a reset link has been sent",
-        reset_token=expose,
-    )
-
-
-@router.post("/reset-password", response_model=MessageResponse)
-async def reset_password(payload: ResetPasswordRequest, service: AuthServiceDep):
-    await service.reset_password(payload.token, payload.new_password)
-    return MessageResponse(message="Password has been reset")
 
 
 @router.post("/change-password", response_model=MessageResponse)
