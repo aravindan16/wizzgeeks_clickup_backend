@@ -21,6 +21,7 @@ class ListCreate(BaseModel):
 class ListUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     privacy: Privacy | None = None
+    icon: str | None = Field(default=None, max_length=16)  # emoji shown instead of the initial
     # Per-List task statuses: inherit the Space workflow, or use a custom one.
     status_mode: StatusMode | None = None
     statuses: list[StatusItem] | None = None
@@ -35,6 +36,7 @@ class ListResponse(ORMModel):
     space_id: str
     name: str
     key: str | None = None
+    icon: str | None = None
     privacy: str = "public"
     is_archived: bool = False
     owner_id: str | None = None

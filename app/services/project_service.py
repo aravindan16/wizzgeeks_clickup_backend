@@ -208,6 +208,8 @@ class ProjectService:
         for field in ("name", "description", "status", "start_date", "end_date"):
             if data.get(field) is not None:
                 update[field] = data[field]
+        if data.get("icon") is not None:
+            update["icon"] = data["icon"] or None
         updated = await self.projects.update_by_id(project_id, update)
         await self.audit.log(
             actor_id=actor.user_id, action="project.updated", entity_type="project",
