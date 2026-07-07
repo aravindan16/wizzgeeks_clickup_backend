@@ -138,6 +138,8 @@ class ListService:
             update["name"] = data["name"].strip()
         if data.get("privacy") is not None:
             update["privacy"] = data["privacy"]
+        if data.get("icon") is not None:
+            update["icon"] = data["icon"] or None
         if data.get("status_mode") is not None:
             update["status_mode"] = data["status_mode"]
             # Custom → store the normalized list; Inherit → drop any custom statuses.
