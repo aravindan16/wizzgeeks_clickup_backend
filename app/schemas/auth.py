@@ -34,21 +34,6 @@ class RefreshResponse(BaseModel):
     expires_in: int
 
 
-class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
-
-
-class ForgotPasswordResponse(BaseModel):
-    message: str
-    # Returned only in non-production environments to ease testing (no mail server yet).
-    reset_token: str | None = None
-
-
-class ResetPasswordRequest(BaseModel):
-    token: str
-    new_password: str = Field(min_length=8, max_length=128)
-
-
 class ChangePasswordRequest(BaseModel):
     current_password: str = Field(min_length=1)
     new_password: str = Field(min_length=8, max_length=128)

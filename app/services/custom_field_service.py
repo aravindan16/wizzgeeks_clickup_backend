@@ -193,6 +193,12 @@ class CustomFieldService:
                                       enabled=str(f["_id"]) not in disabled,
                                       created_by_name=await resolve(f.get("created_by"))))
             for f in await self.fields.list_for_list(list_id):
+                cfg = f.get("config") or {}
+                # A relationship field created here but "Related to" ANOTHER List belongs
+                # on that target List, not on the List where it was created — so skip it.
+                if f.get("type") == "relationship" and cfg.get("related_to") == "list" \
+                        and cfg.get("list_id") and str(cfg.get("list_id")) != list_id:
+                    continue
                 out.append(self._base(f, inherited=False, location=lst["name"],
                                       created_by_name=await resolve(f.get("created_by"))))
         else:
@@ -200,30 +206,24 @@ class CustomFieldService:
                 out.append(self._base(f, inherited=False, location=project["name"],
                                       created_by_name=await resolve(f.get("created_by"))))
 
-        # --- Bidirectional (paired) relationships ---
-        # A relationship field that lives on List A and is "related to" List B is a
-        # two-way link: it must ALSO appear on List B's tasks (the reverse side), where
-        # it lets you link List A's tasks. So when viewing List B, surface every
-        # relationship field anywhere in the Space whose target is this List, flipping
-        # its search scope back to the owning List.
+        # Space-scoped fields inherit to every List. A List-scoped relationship field
+        # that is "Related to" a specific List shows on THAT (target) List — the List
+        # it points to — not the List where it was created.
         if list_id:
             have = {f["_id"] for f in out}
             for f in await self.fields.list_all_in_space(space_id):
-                if str(f["_id"]) in have or f.get("type") != "relationship":
+                if f["_id"] in have or f.get("type") != "relationship":
                     continue
                 cfg = f.get("config") or {}
                 if cfg.get("related_to") == "list" and str(cfg.get("list_id")) == list_id:
-                    owner_list = str(f["list_id"]) if (f.get("scope") == "list" and f.get("list_id")) else None
-                    rev_cfg = {**cfg, "related_to": "list", "list_id": owner_list} if owner_list \
-                        else {**cfg, "related_to": "workspace", "list_id": None}
-                    loc = (await self.lists.find_by_id(owner_list) or {}).get("name") if owner_list else project["name"]
-                    out.append(self._base({**f, "config": rev_cfg}, inherited=True,
-                                          location=loc or project["name"],
+                    owner = await self.lists.find_by_id(str(f["list_id"])) if f.get("list_id") else None
+                    out.append(self._base(f, inherited=False, location=(owner or {}).get("name") or lst["name"],
                                           created_by_name=await resolve(f.get("created_by"))))
-                    have.add(str(f["_id"]))
+                    have.add(f["_id"])
 
-            # Also surface any relationship field this specific task is already linked
-            # under but that isn't otherwise shown (e.g. workspace-scoped fields).
+            # Still surface any relationship field this specific task is already linked
+            # under but that isn't otherwise shown (e.g. workspace-scoped fields) so an
+            # existing stored value is never hidden.
             if task_id and is_valid_object_id(task_id) and self.tasks:
                 task = await self.tasks.find_by_id(task_id)
                 for fid in list((task or {}).get("custom_fields", {}) or {}):
@@ -233,6 +233,10 @@ class CustomFieldService:
                     if not f or f.get("is_deleted") or f.get("type") != "relationship":
                         continue
                     if str(f.get("space_id")) != space_id:
+                        continue
+                    # A List-scoped field belongs only to its owning List — never
+                    # surface it on another List's task, even via a stale stored value.
+                    if f.get("scope") == "list" and str(f.get("list_id")) != list_id:
                         continue
                     loc = (await self.lists.find_by_id(str(f["list_id"])) or {}).get("name") if f.get("list_id") else project["name"]
                     out.append(self._base(f, inherited=True, location=loc or project["name"],

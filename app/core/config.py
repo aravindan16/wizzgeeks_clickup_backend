@@ -83,9 +83,6 @@ class Settings(BaseSettings):
     FIRST_SUPERADMIN_PASSWORD: str = "Admin@123"
     FIRST_SUPERADMIN_NAME: str = "Super Admin"
 
-    # --- Password reset ---
-    RESET_TOKEN_EXPIRE_MINUTES: int = 30
-
 
 @lru_cache
 def get_settings() -> Settings:
