@@ -21,7 +21,6 @@ from app.repositories.daily_update_repository import DailyUpdateRepository
 from app.repositories.notification_repository import NotificationRepository
 from app.repositories.project_member_repository import ProjectMemberRepository
 from app.repositories.project_repository import ProjectRepository
-from app.repositories.reset_repository import PasswordResetRepository
 from app.repositories.role_repository import RoleRepository
 from app.repositories.custom_field_repository import CustomFieldRepository
 from app.repositories.list_repository import ListRepository
@@ -38,6 +37,8 @@ from app.services.comment_service import CommentService
 from app.services.daily_update_service import DailyUpdateService
 from app.services.dashboard_service import DashboardService
 from app.services.user_dashboard_service import UserDashboardService
+from app.services.saved_filter_service import SavedFilterService
+from app.services.label_service import LabelService
 from app.services.notification_service import NotificationService
 from app.services.custom_field_service import CustomFieldService
 from app.services.list_service import ListService
@@ -67,10 +68,6 @@ def get_role_repo(db: DbDep) -> RoleRepository:
 
 def get_token_repo(db: DbDep) -> RefreshTokenRepository:
     return RefreshTokenRepository(db)
-
-
-def get_reset_repo(db: DbDep) -> PasswordResetRepository:
-    return PasswordResetRepository(db)
 
 
 def get_audit_repo(db: DbDep) -> ActivityLogRepository:
@@ -229,14 +226,21 @@ def get_user_dashboard_service(db: DbDep) -> UserDashboardService:
     return UserDashboardService(db)
 
 
+def get_saved_filter_service(db: DbDep) -> SavedFilterService:
+    return SavedFilterService(db)
+
+
+def get_label_service(db: DbDep) -> LabelService:
+    return LabelService(db)
+
+
 
 def get_auth_service(
     users: Annotated[UserRepository, Depends(get_user_repo)],
     roles: Annotated[RoleService, Depends(get_role_service)],
     tokens: Annotated[RefreshTokenRepository, Depends(get_token_repo)],
-    resets: Annotated[PasswordResetRepository, Depends(get_reset_repo)],
 ) -> AuthService:
-    return AuthService(users, roles, tokens, resets)
+    return AuthService(users, roles, tokens)
 
 
 # --- Current user / RBAC ---

@@ -1,9 +1,9 @@
 """Authentication business logic: login, refresh (rotation + reuse detection),
-logout, forgot/reset/change password."""
+logout, change password."""
 import hashlib
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from bson import ObjectId
@@ -23,10 +23,8 @@ from app.core.security import (
     verify_password,
     JWTError,
 )
-from app.repositories.reset_repository import PasswordResetRepository
 from app.repositories.token_repository import RefreshTokenRepository
 from app.repositories.user_repository import UserRepository
-from app.services.email_service import send_email
 from app.services.role_service import RoleService
 from app.utils.datetime import utcnow
 
@@ -57,12 +55,10 @@ class AuthService:
         users: UserRepository,
         roles: RoleService,
         tokens: RefreshTokenRepository,
-        resets: PasswordResetRepository,
     ):
         self.users = users
         self.roles = roles
         self.tokens = tokens
-        self.resets = resets
 
     # --- token helpers ---
     async def _issue_refresh(self, user_id: str) -> str:
@@ -141,42 +137,7 @@ class AuthService:
         except JWTError:
             return
 
-    # --- forgot / reset / change ---
-    async def forgot_password(self, email: str) -> str | None:
-        user = await self.users.find_by_email(email)
-        if not user:
-            return None  # do not reveal account existence
-        raw = secrets.token_urlsafe(32)
-        expires_at = utcnow() + timedelta(minutes=settings.RESET_TOKEN_EXPIRE_MINUTES)
-        await self.resets.create(
-            token_hash=_hash_token(raw),
-            user_id=str(user["_id"]),
-            expires_at=expires_at,
-            created_at=utcnow(),
-        )
-        # Email the reset link (when SMTP is configured).
-        link = f"{settings.FRONTEND_URL}/reset-password?token={raw}"
-        mins = settings.RESET_TOKEN_EXPIRE_MINUTES
-        await send_email(
-            email,
-            "Reset your Wizzgeeks password",
-            f"Hi {user.get('full_name', '')},\n\nReset your password using this link "
-            f"(valid for {mins} minutes):\n{link}\n\nIf you didn't request this, ignore this email.",
-            f"<p>Hi {user.get('full_name', '')},</p>"
-            f"<p>Reset your password using the link below (valid for {mins} minutes):</p>"
-            f"<p><a href=\"{link}\">Reset your password</a></p>"
-            f"<p>If you didn't request this, you can ignore this email.</p>",
-        )
-        return raw
-
-    async def reset_password(self, token: str, new_password: str) -> None:
-        record = await self.resets.find_valid(_hash_token(token), utcnow())
-        if not record:
-            raise AuthenticationError("Invalid or expired reset token")
-        await self.users.set_password(record["user_id"], hash_password(new_password), utcnow())
-        await self.resets.mark_used(record["token_hash"])
-        await self.tokens.revoke_all_for_user(record["user_id"])
-
+    # --- change password ---
     async def change_password(self, user_id: str, current: str, new: str) -> None:
         user = await self.users.find_one({"_id": ObjectId(user_id)})
         if not user:
@@ -253,7 +214,7 @@ class AuthService:
             now = utcnow()
             created = await self.users.insert_one({
                 "email": email,
-                # Random password hash — Google users sign in via Google (or use reset).
+                # Random password hash — Google users sign in via Google.
                 "password_hash": hash_password(secrets.token_urlsafe(24)),
                 "full_name": full_name, "role_ids": role_ids, "manager_id": None,
                 "designation": None, "department": None, "timezone": "UTC",

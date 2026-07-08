@@ -35,6 +35,7 @@ class SaveTemplateRequest(BaseModel):
 class ProjectUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
+    icon: str | None = Field(default=None, max_length=16)  # emoji shown instead of the initial
     status: ProjectStatus | None = None
     start_date: str | None = None
     end_date: str | None = None
@@ -44,6 +45,7 @@ class ProjectResponse(ORMModel):
     id: str = Field(alias="_id")
     key: str
     name: str
+    icon: str | None = None
     description: str | None = None
     status: str
     owner_id: str | None = None

@@ -44,6 +44,7 @@ class TaskUpdate(BaseModel):
     end_date: str | None = None
     due_date: str | None = None
     labels: list[str] | None = None
+    reporter_id: str | None = None
     estimate_hours: float | None = Field(default=None, ge=0)
     custom_fields: dict[str, Any] | None = None
 

@@ -2,7 +2,10 @@
 watchers, worklog, metrics — with project-member access enforcement."""
 from typing import Any
 
+from pymongo.errors import DuplicateKeyError
+
 from app.core.exceptions import (
+    ConflictError,
     NotFoundError,
     PermissionDeniedError,
     ValidationError,
@@ -242,22 +245,19 @@ class TaskService:
         if init_status not in allowed:
             raise ValidationError(f"Invalid status '{init_status}' for this list/space")
 
-        # Task IDs are derived from the List's key (e.g. FE-1). Fall back to the
-        # Space key only if the list has none (legacy lists / no list).
-        list_key = None
-        if list_oid and self.lists:
-            lst_doc = await self.lists.find_by_id(list_oid)
-            list_key = (lst_doc or {}).get("key")
-        if list_key:
-            seq = await self.lists.next_task_seq(list_oid)
-            key = f"{list_key}-{seq}"
-        else:
-            seq = await self.projects.next_task_seq(project_id)
-            key = f"{project['key']}-{seq}"
+        # Task IDs use the SPACE key as a single shared prefix (e.g. WR-1), common to
+        # every task in the Space regardless of which List it lives in — one running
+        # sequence per Space, not per List.
+        # Task `key` is globally unique. When another Space shares the same key prefix
+        # (or old soft-deleted tasks still hold a key), the next sequence can collide —
+        # so allocate the key with retry, advancing the counter until free.
+        async def _next_key() -> str:
+            return f"{project['key']}-{await self.projects.next_task_seq(project_id)}"
+
         now = utcnow()
         doc = {
             "project_id": to_object_id(project_id),
-            "key": key,
+            "key": await _next_key(),
             "title": data["title"],
             "description": data.get("description"),
             "type": data.get("type", "task"),
@@ -283,7 +283,16 @@ class TaskService:
             "created_at": now,
             "updated_at": now,
         }
-        created = await self.tasks.insert_one(doc)
+        created = None
+        for _ in range(50):
+            try:
+                created = await self.tasks.insert_one(doc)
+                break
+            except DuplicateKeyError:
+                doc["key"] = await _next_key()  # key already taken → try the next sequence
+        if created is None:
+            raise ConflictError("Could not allocate a unique task key")
+        key = doc["key"]
         tid = str(created["_id"])
 
         await self.history.record({
@@ -353,6 +362,9 @@ class TaskService:
                            "labels", "estimate_hours", "custom_fields"):
             if data.get(field_name) is not None:
                 update[field_name] = data[field_name]
+        if data.get("reporter_id") is not None:
+            rid = data["reporter_id"]
+            update["reporter_id"] = to_object_id(rid) if rid else None
         updated = await self.tasks.update_by_id(task_id, update)
         changes = {k: v for k, v in update.items() if k != "updated_at"}
         await self.audit.log(actor_id=actor.user_id, action="task.updated", entity_type="task",
@@ -539,8 +551,26 @@ class TaskService:
         task = await self._get_task_or_404(task_id)
         await self._assert_project_access(str(task["project_id"]), actor)
         await self.tasks.soft_delete_by_id(task_id, when=utcnow())
+        # Remove this task's id from every relationship custom field that links it, so
+        # no card/detail keeps showing a stale link to a deleted task.
+        await self._cleanup_relationship_refs(task)
         await self.audit.log(actor_id=actor.user_id, action="task.deleted", entity_type="task",
                              entity_id=task_id, ip=actor.ip)
+
+    async def _cleanup_relationship_refs(self, task: dict[str, Any]) -> None:
+        if self.custom_fields is None:
+            return
+        tid = str(task["_id"])
+        space_id = str(task["project_id"])
+        rel_fields = [f for f in await self.custom_fields.list_all_in_space(space_id)
+                      if f.get("type") == "relationship"]
+        for f in rel_fields:
+            fid = str(f["_id"])
+            refs = await self.tasks.find_many({f"custom_fields.{fid}": tid, "is_deleted": {"$ne": True}}, limit=1000)
+            for r in refs:
+                cf = dict(r.get("custom_fields") or {})
+                cf[fid] = [str(x) for x in (cf.get(fid) or []) if str(x) != tid]
+                await self.tasks.update_by_id(str(r["_id"]), {"custom_fields": cf})
 
     # --- activity (audit feed: created + every update) ---
     async def task_activity(self, task_id: str, actor: ActorContext) -> list[dict[str, Any]]:
