@@ -25,6 +25,12 @@ class UserUpdate(BaseModel):
     avatar_url: str | None = None
 
 
+class AdminPasswordReset(BaseModel):
+    """Admin sets a new password for a user who forgot theirs."""
+
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 class UserResponse(ORMModel):
     id: str = Field(alias="_id")
     email: EmailStr

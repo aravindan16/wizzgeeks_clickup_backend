@@ -201,6 +201,31 @@ class UserService:
             )
         return _serialize(updated, await self._role_keys_for(updated.get("role_ids", [])))
 
+    async def reset_password(
+        self, user_id: str, new_password: str, actor: ActorContext | None = None
+    ) -> dict[str, Any]:
+        """Admin sets a new password for a user (e.g. they forgot theirs)."""
+        user = await self.users.find_safe_by_id(user_id)
+        if not user or user.get("is_deleted"):
+            raise NotFoundError("User not found")
+        now = utcnow()
+        updated = await self.users.update_by_id(user_id, {
+            "password_hash": hash_password(new_password),
+            "password_changed_at": now,
+            "updated_at": now,
+        })
+        updated.pop("password_hash", None)
+        if actor:
+            await self.audit.log(
+                actor_id=actor.user_id,
+                action="user.password_reset",
+                entity_type="user",
+                entity_id=user_id,
+                metadata={"by": "admin"},
+                ip=actor.ip,
+            )
+        return _serialize(updated, await self._role_keys_for(updated.get("role_ids", [])))
+
     async def set_preferences(self, user_id: str, prefs: dict[str, Any]) -> dict[str, Any]:
         user = await self.users.find_safe_by_id(user_id)
         if not user or user.get("is_deleted"):
