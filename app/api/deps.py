@@ -351,15 +351,21 @@ TenantDep = Annotated[TenantContext, Depends(get_tenant_context)]
 
 
 def require(*required_permissions: str):
-    """Dependency factory enforcing that the current user holds ALL given permissions."""
+    """Reusable permission guard (a.k.a. requirePermission). Use as a route
+    dependency: `Depends(require("task.create"))`. Enforces that the current user
+    holds ALL given permissions; otherwise raises 403 with a standard message."""
 
     async def _checker(user: CurrentUserDep) -> CurrentUser:
         for perm in required_permissions:
             if not has_permission(user.permissions, perm):
                 raise PermissionDeniedError(
-                    f"Missing required permission: {perm}",
-                    {"required": list(required_permissions)},
+                    "You do not have permission to perform this action.",
+                    {"required": list(required_permissions), "missing": perm},
                 )
         return user
 
     return _checker
+
+
+# Alias so call sites can read like the RBAC spec.
+require_permission = require

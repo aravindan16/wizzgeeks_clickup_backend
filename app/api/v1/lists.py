@@ -23,7 +23,7 @@ ListServiceDep = Annotated[ListService, Depends(get_list_service)]
 async def list_lists(
     request: Request,
     service: ListServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("project.read"))],
+    actor: Annotated[CurrentUser, Depends(require("list.read"))],
     space_id: str = Query(...),
     include_archived: bool = False,
 ):
@@ -35,7 +35,7 @@ async def create_list(
     payload: ListCreate,
     request: Request,
     service: ListServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("task.create"))],
+    actor: Annotated[CurrentUser, Depends(require("list.create"))],
 ):
     return await service.create_list(payload.model_dump(), make_actor(actor, request))
 
@@ -45,7 +45,7 @@ async def get_list(
     list_id: str,
     request: Request,
     service: ListServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("project.read"))],
+    actor: Annotated[CurrentUser, Depends(require("list.read"))],
 ):
     return await service.get_list(list_id, make_actor(actor, request))
 
@@ -56,7 +56,7 @@ async def update_list(
     payload: ListUpdate,
     request: Request,
     service: ListServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("task.create"))],
+    actor: Annotated[CurrentUser, Depends(require("list.update"))],
 ):
     return await service.update_list(list_id, payload.model_dump(exclude_unset=True), make_actor(actor, request))
 
@@ -66,7 +66,7 @@ async def duplicate_list(
     list_id: str,
     request: Request,
     service: ListServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("task.create"))],
+    actor: Annotated[CurrentUser, Depends(require("list.create"))],
 ):
     return await service.duplicate_list(list_id, make_actor(actor, request))
 
@@ -76,7 +76,7 @@ async def archive_list(
     list_id: str,
     request: Request,
     service: ListServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("task.create"))],
+    actor: Annotated[CurrentUser, Depends(require("list.update"))],
 ):
     return await service.archive_list(list_id, make_actor(actor, request))
 
@@ -87,7 +87,7 @@ async def move_list(
     payload: MoveListRequest,
     request: Request,
     service: ListServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("task.create"))],
+    actor: Annotated[CurrentUser, Depends(require("list.update"))],
 ):
     return await service.move_list(list_id, payload.space_id, make_actor(actor, request))
 
@@ -97,7 +97,7 @@ async def delete_list(
     list_id: str,
     request: Request,
     service: ListServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("task.create"))],
+    actor: Annotated[CurrentUser, Depends(require("list.delete"))],
 ):
     await service.delete_list(list_id, make_actor(actor, request))
     return MessageResponse(message="List deleted")

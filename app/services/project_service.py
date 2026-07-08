@@ -21,8 +21,7 @@ from app.utils.datetime import utcnow
 
 # Project-member role keys → friendly label for notifications.
 ROLE_LABELS = {
-    "project_manager": "Project Manager", "team_lead": "Team Lead",
-    "developer": "Developer", "tester": "Tester",
+    "super_admin": "Super Admin", "admin": "Admin", "employee": "Employee",
 }
 
 # Tasks considered "done" for progress calculations.
@@ -105,7 +104,7 @@ class ProjectService:
         if actor.user_id:
             await self.members.add(
                 project_id=pid, user_id=actor.user_id,
-                project_role="project_manager", added_by=actor.user_id, added_at=now,
+                project_role="admin", added_by=actor.user_id, added_at=now,
             )
 
         await self.audit.log(

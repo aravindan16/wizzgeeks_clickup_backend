@@ -1,78 +1,133 @@
 """Permission catalog and default role → permission matrix (DB-driven RBAC).
 
-These constants are the *seed* source of truth. Once seeded into the `roles`
-collection, a Super Admin can edit permissions at runtime; the database is then
-authoritative. `WILDCARD` ("*") grants every permission.
+This module is the *seed* source of truth. `seed_permissions()` mirrors the
+catalog into the `permissions` collection (so the frontend reads permissions
+from the DB, never hardcoded), and `SYSTEM_ROLES` seeds the `roles` collection.
+A Super Admin can then edit roles at runtime; the database is authoritative.
+`WILDCARD` ("*") grants every permission.
+
+Adding a new module = add one entry to PERMISSION_CATALOG. Everything else
+(the flat PERMISSIONS list, the DB seed, the catalog endpoint, and the Admin
+role's full grant) derives from it automatically — the system is extensible by
+design.
 """
 
 WILDCARD = "*"
 
-# --- Permission catalog (single source of truth for known permission strings) ---
-PERMISSIONS: list[str] = [
-    # users
-    "user.create", "user.read", "user.update", "user.delete",
-    # roles
-    "role.read", "role.manage",
-    # projects
-    "project.create", "project.read", "project.update", "project.delete",
-    "project.member.manage",
-    # tasks
-    "task.create", "task.read", "task.update", "task.delete",
-    "task.assign", "task.status.update",
-    # daily updates
-    "dailyupdate.create", "dailyupdate.read.self", "dailyupdate.read.team",
-    "dailyupdate.read.all", "dailyupdate.acknowledge",
-    # comments
-    "comment.create", "comment.update", "comment.delete",
-    # reports
-    "report.view.self", "report.view.team", "report.view.all",
-    # dashboards
-    "dashboard.view.team", "dashboard.view.admin",
-    # admin
-    "audit.read", "admin.settings",
+# --- Grouped permission catalog (single source of truth) ---
+# Each module: { key, module, permissions: [{ key, label }] }.
+PERMISSION_CATALOG: list[dict] = [
+    {"key": "users", "module": "Users", "permissions": [
+        {"key": "user.create", "label": "Create users"},
+        {"key": "user.read", "label": "View users"},
+        {"key": "user.update", "label": "Edit users"},
+        {"key": "user.delete", "label": "Delete users"},
+    ]},
+    {"key": "spaces", "module": "Spaces", "permissions": [
+        {"key": "project.create", "label": "Create spaces"},
+        {"key": "project.read", "label": "View spaces"},
+        {"key": "project.update", "label": "Edit spaces"},
+        {"key": "project.delete", "label": "Delete spaces"},
+        {"key": "project.archive", "label": "Archive spaces"},
+        {"key": "project.restore", "label": "Restore spaces"},
+        {"key": "project.member.manage", "label": "Manage space members & roles"},
+    ]},
+    {"key": "lists", "module": "Lists", "permissions": [
+        {"key": "list.create", "label": "Create lists"},
+        {"key": "list.read", "label": "View lists"},
+        {"key": "list.update", "label": "Edit lists"},
+        {"key": "list.delete", "label": "Delete lists"},
+    ]},
+    {"key": "tasks", "module": "Tasks", "permissions": [
+        {"key": "task.create", "label": "Create tasks"},
+        {"key": "task.read", "label": "View tasks"},
+        {"key": "task.update", "label": "Edit tasks"},
+        {"key": "task.delete", "label": "Delete tasks"},
+        {"key": "task.assign", "label": "Assign tasks"},
+        {"key": "task.status.update", "label": "Change task status"},
+        {"key": "task.priority.update", "label": "Change task priority"},
+        {"key": "task.comment", "label": "Comment on tasks"},
+        {"key": "task.attachments", "label": "Manage task attachments"},
+    ]},
+    {"key": "views", "module": "Views", "permissions": [
+        {"key": "view.create", "label": "Create views"},
+        {"key": "view.update", "label": "Edit views"},
+        {"key": "view.delete", "label": "Delete views"},
+    ]},
+    {"key": "comments", "module": "Comments", "permissions": [
+        {"key": "comment.create", "label": "Create comments"},
+        {"key": "comment.read", "label": "View comments"},
+        {"key": "comment.update", "label": "Edit comments"},
+        {"key": "comment.delete", "label": "Delete comments"},
+    ]},
+    {"key": "roles", "module": "Roles & Permissions", "permissions": [
+        {"key": "permission.manage", "label": "Access the Permission setting page"},
+        {"key": "role.create", "label": "Create roles"},
+        {"key": "role.read", "label": "View roles"},
+        {"key": "role.update", "label": "Edit roles"},
+        {"key": "role.delete", "label": "Delete roles"},
+    ]},
+    {"key": "daily", "module": "Daily updates", "permissions": [
+        {"key": "dailyupdate.create", "label": "Create daily updates"},
+        {"key": "dailyupdate.read.self", "label": "Read own daily updates"},
+        {"key": "dailyupdate.read.team", "label": "Read team daily updates"},
+        {"key": "dailyupdate.read.all", "label": "Read all daily updates"},
+        {"key": "dailyupdate.acknowledge", "label": "Acknowledge daily updates"},
+    ]},
+    {"key": "reports", "module": "Reports", "permissions": [
+        {"key": "report.view.self", "label": "View own reports"},
+        {"key": "report.view.team", "label": "View team reports"},
+        {"key": "report.view.all", "label": "View all reports"},
+    ]},
+    {"key": "dashboards", "module": "Dashboards", "permissions": [
+        {"key": "dashboard.view.team", "label": "View team dashboards"},
+        {"key": "dashboard.view.admin", "label": "View admin dashboards"},
+    ]},
+    {"key": "admin", "module": "Administration", "permissions": [
+        {"key": "audit.read", "label": "View audit log"},
+        {"key": "admin.settings", "label": "Manage app settings"},
+    ]},
 ]
 
-# --- System role definitions (key, display name, level, permissions) ---
-EMPLOYEE_PERMS = [
-    "project.read",
-    "project.create",  # anyone can create a space; the creator becomes its owner/admin
-    "task.create", "task.read", "task.update", "task.status.update",
-    "dailyupdate.create", "dailyupdate.read.self",
-    "comment.create", "comment.update", "comment.delete",
-    "report.view.self",
-]
+# Flat list of every known permission string (derived from the catalog).
+PERMISSIONS: list[str] = [p["key"] for group in PERMISSION_CATALOG for p in group["permissions"]]
 
-TEAM_LEAD_PERMS = EMPLOYEE_PERMS + [
-    "user.read",  # view team members; employees cannot browse the org directory
-    "task.assign",
-    "project.member.manage",
-    "dailyupdate.read.team", "dailyupdate.acknowledge",
-    "report.view.team",
-    "dashboard.view.team",
-]
 
-MANAGER_PERMS = TEAM_LEAD_PERMS + [
-    "project.create", "project.update",
-    "dailyupdate.read.all",
-    "report.view.all",
-]
+def _module(*keys: str) -> list[str]:
+    """All permission keys for one or more catalog module keys."""
+    out: list[str] = []
+    for group in PERMISSION_CATALOG:
+        if group["key"] in keys:
+            out += [p["key"] for p in group["permissions"]]
+    return out
 
-ADMIN_PERMS = sorted(set(MANAGER_PERMS + [
-    "user.create", "user.update", "user.delete",
-    "role.read",
-    "project.delete",
-    "task.delete",
-    "dashboard.view.admin",
-    "audit.read",
-]))
+
+# --- Default role → permission matrix ---
+# Employee: work inside the spaces they belong to (space membership is the finer
+# gate, enforced in the services) — manage lists/views/tasks, collaborate, own reports.
+EMPLOYEE_PERMS = sorted(set(
+    ["project.read", "project.create", "comment.read"]
+    + _module("lists")   # list.create / read / update / delete
+    + _module("views")   # view.create / update / delete
+    + ["task.create", "task.read", "task.update", "task.status.update",
+       "task.priority.update", "task.assign", "task.comment", "task.attachments"]
+    + ["comment.create", "comment.update", "comment.delete"]
+    + ["dailyupdate.create", "dailyupdate.read.self", "report.view.self"]
+))
+
+# Admin: every explicit permission (manages users, spaces, tasks, roles, reports,
+# settings). Differs from Super Admin only in lacking the "*" future-proof wildcard.
+ADMIN_PERMS = sorted(set(PERMISSIONS))
 
 SYSTEM_ROLES: list[dict] = [
     {"key": "super_admin", "name": "Super Admin", "level": 100, "permissions": [WILDCARD]},
     {"key": "admin", "name": "Admin", "level": 80, "permissions": ADMIN_PERMS},
-    {"key": "manager", "name": "Manager", "level": 60, "permissions": sorted(set(MANAGER_PERMS))},
-    {"key": "team_lead", "name": "Team Lead", "level": 40, "permissions": sorted(set(TEAM_LEAD_PERMS))},
-    {"key": "employee", "name": "Employee", "level": 20, "permissions": sorted(set(EMPLOYEE_PERMS))},
+    {"key": "employee", "name": "Employee", "level": 20, "permissions": EMPLOYEE_PERMS},
 ]
+
+# Roles that were removed from the system; startup cleanup reassigns their users
+# to Employee and deletes the leftover role docs.
+RETIRED_ROLE_KEYS = ["manager", "team_lead"]
 
 
 def has_permission(granted: set[str], required: str) -> bool:
