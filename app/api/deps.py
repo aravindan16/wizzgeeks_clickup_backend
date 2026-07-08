@@ -21,6 +21,7 @@ from app.repositories.daily_update_repository import DailyUpdateRepository
 from app.repositories.notification_repository import NotificationRepository
 from app.repositories.project_member_repository import ProjectMemberRepository
 from app.repositories.project_repository import ProjectRepository
+from app.repositories.space_role_repository import SpaceRoleRepository
 from app.repositories.role_repository import RoleRepository
 from app.repositories.custom_field_repository import CustomFieldRepository
 from app.repositories.list_repository import ListRepository
@@ -117,6 +118,10 @@ def get_status_template_repo(db: DbDep) -> StatusTemplateRepository:
     return StatusTemplateRepository(db)
 
 
+def get_space_role_repo(db: DbDep) -> SpaceRoleRepository:
+    return SpaceRoleRepository(db)
+
+
 def get_project_service(
     projects: Annotated[ProjectRepository, Depends(get_project_repo)],
     members: Annotated[ProjectMemberRepository, Depends(get_project_member_repo)],
@@ -124,8 +129,9 @@ def get_project_service(
     audit: Annotated[AuditService, Depends(get_audit_service)],
     notifications: Annotated[NotificationService, Depends(get_notification_service)],
     status_templates: Annotated[StatusTemplateRepository, Depends(get_status_template_repo)],
+    space_roles: Annotated[SpaceRoleRepository, Depends(get_space_role_repo)],
 ) -> ProjectService:
-    return ProjectService(projects, members, users, audit, notifications, status_templates)
+    return ProjectService(projects, members, users, audit, notifications, status_templates, space_roles)
 
 
 def get_task_repo(db: DbDep) -> TaskRepository:

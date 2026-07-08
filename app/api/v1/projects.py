@@ -19,6 +19,7 @@ from app.schemas.project import (
     ProjectUpdate,
     SaveTemplateRequest,
 )
+from app.schemas.space_role import SpaceRoleCreate, SpaceRoleResponse
 from app.services.project_service import ProjectService
 
 router = APIRouter()
@@ -191,3 +192,37 @@ async def remove_member(
 ):
     await service.remove_member(project_id, user_id, make_actor(actor, request))
     return MessageResponse(message="Member removed")
+
+
+# --- custom space roles ---
+@router.get("/{project_id}/roles", response_model=list[SpaceRoleResponse])
+async def list_space_roles(
+    project_id: str,
+    service: ProjectServiceDep,
+    actor: Annotated[CurrentUser, Depends(require("project.read"))],
+    request: Request,
+):
+    return await service.list_space_roles(project_id, make_actor(actor, request))
+
+
+@router.post("/{project_id}/roles", response_model=SpaceRoleResponse, status_code=201)
+async def create_space_role(
+    project_id: str,
+    payload: SpaceRoleCreate,
+    request: Request,
+    service: ProjectServiceDep,
+    actor: Annotated[CurrentUser, Depends(require("project.read"))],
+):
+    return await service.create_space_role(project_id, payload.model_dump(), make_actor(actor, request))
+
+
+@router.delete("/{project_id}/roles/{role_id}", response_model=MessageResponse)
+async def delete_space_role(
+    project_id: str,
+    role_id: str,
+    request: Request,
+    service: ProjectServiceDep,
+    actor: Annotated[CurrentUser, Depends(require("project.read"))],
+):
+    await service.delete_space_role(project_id, role_id, make_actor(actor, request))
+    return MessageResponse(message="Role deleted")
