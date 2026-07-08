@@ -11,7 +11,7 @@ from app.api.deps import CurrentUser, CurrentUserDep, get_user_service, make_act
 from app.core.config import settings
 from app.core.exceptions import ValidationError
 from app.schemas.common import MessageResponse, PaginatedResponse
-from app.schemas.user import UserCreate, UserResponse, UserUpdate
+from app.schemas.user import AdminPasswordReset, UserCreate, UserResponse, UserUpdate
 from app.services.user_service import UserService
 from app.utils.storage import store_avatar
 
@@ -131,6 +131,18 @@ async def activate_user(
     actor: Annotated[CurrentUser, Depends(require("user.update"))],
 ):
     return await service.set_status(user_id, "active", make_actor(actor, request))
+
+
+@router.post("/{user_id}/reset-password", response_model=UserResponse)
+async def reset_user_password(
+    user_id: str,
+    payload: AdminPasswordReset,
+    request: Request,
+    service: UserServiceDep,
+    actor: Annotated[CurrentUser, Depends(require("user.update"))],
+):
+    """Admin resets a user's password (used when a user forgets theirs)."""
+    return await service.reset_password(user_id, payload.new_password, make_actor(actor, request))
 
 
 @router.delete("/{user_id}", response_model=MessageResponse)
