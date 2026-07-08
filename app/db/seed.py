@@ -2,7 +2,7 @@
 import logging
 
 from app.core.config import settings
-from app.core.permissions import SYSTEM_ROLES
+from app.core.permissions import PERMISSION_CATALOG, RETIRED_ROLE_KEYS, SYSTEM_ROLES
 from app.core.security import hash_password
 from app.repositories.role_repository import RoleRepository
 from app.repositories.user_repository import UserRepository
@@ -11,12 +11,59 @@ from app.utils.datetime import utcnow
 logger = logging.getLogger(__name__)
 
 
+async def seed_permissions(db) -> None:
+    """Mirror the permission catalog into the `permissions` collection so it is
+    DB-driven (the frontend reads permissions from the DB, never hardcoded)."""
+    now = utcnow()
+    order = 0
+    for group in PERMISSION_CATALOG:
+        for perm in group["permissions"]:
+            await db["permissions"].update_one(
+                {"key": perm["key"]},
+                {"$set": {
+                    "key": perm["key"], "label": perm["label"],
+                    "module": group["module"], "module_key": group["key"],
+                    "order": order, "updated_at": now,
+                }, "$setOnInsert": {"created_at": now}},
+                upsert=True,
+            )
+            order += 1
+    # Drop any permission docs no longer in the catalog.
+    valid = [p["key"] for g in PERMISSION_CATALOG for p in g["permissions"]]
+    await db["permissions"].delete_many({"key": {"$nin": valid}})
+    logger.info("Seeded %d permissions", len(valid))
+
+
 async def seed_roles(db) -> None:
     repo = RoleRepository(db)
     now = utcnow()
     for role in SYSTEM_ROLES:
         await repo.upsert_system_role({**role, "created_at": now})
     logger.info("Seeded %d system roles", len(SYSTEM_ROLES))
+    await _retire_old_roles(db)
+
+
+async def _retire_old_roles(db) -> None:
+    """Reassign any users on a retired role (Manager / Team Lead) to Employee,
+    then delete the retired role documents. Idempotent."""
+    employee = await db["roles"].find_one({"key": "employee"})
+    if not employee:
+        return
+    for key in RETIRED_ROLE_KEYS:
+        role = await db["roles"].find_one({"key": key})
+        if not role:
+            continue
+        # Swap the retired role id for the Employee id on every affected user.
+        await db["users"].update_many(
+            {"role_ids": role["_id"]},
+            {"$addToSet": {"role_ids": employee["_id"]}},
+        )
+        result = await db["users"].update_many(
+            {"role_ids": role["_id"]},
+            {"$pull": {"role_ids": role["_id"]}},
+        )
+        await db["roles"].delete_one({"_id": role["_id"]})
+        logger.info("Retired role '%s'; reassigned %d users to Employee", key, result.modified_count)
 
 
 async def seed_superadmin(db) -> None:
@@ -102,7 +149,7 @@ async def seed_sample_projects(db) -> None:
         })
         return created["_id"]
 
-    lead_id = await ensure_user("lead@dailyactivity.local", "Tara Lead", "team_lead", "Team Lead")
+    lead_id = await ensure_user("lead@dailyactivity.local", "Tara Lead", "employee", "Team Lead")
     dev_id = await ensure_user("dev@dailyactivity.local", "Dan Dev", "employee", "Developer")
     test_id = await ensure_user("qa@dailyactivity.local", "Quinn QA", "employee", "QA Engineer")
 
@@ -116,10 +163,10 @@ async def seed_sample_projects(db) -> None:
     pid = str(project["_id"])
 
     seed_members = [
-        (admin["_id"], "project_manager"),
-        (lead_id, "team_lead"),
-        (dev_id, "developer"),
-        (test_id, "tester"),
+        (admin["_id"], "admin"),
+        (lead_id, "employee"),
+        (dev_id, "employee"),
+        (test_id, "employee"),
     ]
     for uid, prole in seed_members:
         await members.add(
@@ -270,6 +317,7 @@ async def seed_dashboard_demo(db) -> None:
 
 
 async def run_seed(db) -> None:
+    await seed_permissions(db)
     await seed_roles(db)
     await seed_superadmin(db)
     await seed_sample_projects(db)

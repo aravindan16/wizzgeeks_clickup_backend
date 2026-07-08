@@ -21,6 +21,7 @@ from app.repositories.daily_update_repository import DailyUpdateRepository
 from app.repositories.notification_repository import NotificationRepository
 from app.repositories.project_member_repository import ProjectMemberRepository
 from app.repositories.project_repository import ProjectRepository
+from app.repositories.space_role_repository import SpaceRoleRepository
 from app.repositories.role_repository import RoleRepository
 from app.repositories.custom_field_repository import CustomFieldRepository
 from app.repositories.list_repository import ListRepository
@@ -117,6 +118,10 @@ def get_status_template_repo(db: DbDep) -> StatusTemplateRepository:
     return StatusTemplateRepository(db)
 
 
+def get_space_role_repo(db: DbDep) -> SpaceRoleRepository:
+    return SpaceRoleRepository(db)
+
+
 def get_project_service(
     projects: Annotated[ProjectRepository, Depends(get_project_repo)],
     members: Annotated[ProjectMemberRepository, Depends(get_project_member_repo)],
@@ -124,8 +129,9 @@ def get_project_service(
     audit: Annotated[AuditService, Depends(get_audit_service)],
     notifications: Annotated[NotificationService, Depends(get_notification_service)],
     status_templates: Annotated[StatusTemplateRepository, Depends(get_status_template_repo)],
+    space_roles: Annotated[SpaceRoleRepository, Depends(get_space_role_repo)],
 ) -> ProjectService:
-    return ProjectService(projects, members, users, audit, notifications, status_templates)
+    return ProjectService(projects, members, users, audit, notifications, status_templates, space_roles)
 
 
 def get_task_repo(db: DbDep) -> TaskRepository:
@@ -345,15 +351,21 @@ TenantDep = Annotated[TenantContext, Depends(get_tenant_context)]
 
 
 def require(*required_permissions: str):
-    """Dependency factory enforcing that the current user holds ALL given permissions."""
+    """Reusable permission guard (a.k.a. requirePermission). Use as a route
+    dependency: `Depends(require("task.create"))`. Enforces that the current user
+    holds ALL given permissions; otherwise raises 403 with a standard message."""
 
     async def _checker(user: CurrentUserDep) -> CurrentUser:
         for perm in required_permissions:
             if not has_permission(user.permissions, perm):
                 raise PermissionDeniedError(
-                    f"Missing required permission: {perm}",
-                    {"required": list(required_permissions)},
+                    "You do not have permission to perform this action.",
+                    {"required": list(required_permissions), "missing": perm},
                 )
         return user
 
     return _checker
+
+
+# Alias so call sites can read like the RBAC spec.
+require_permission = require

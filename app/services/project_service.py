@@ -11,6 +11,7 @@ from app.core.statuses import SYSTEM_TEMPLATES, normalize_statuses, statuses_for
 from app.repositories.base import is_valid_object_id, to_object_id
 from app.repositories.project_member_repository import ProjectMemberRepository
 from app.repositories.project_repository import ProjectRepository
+from app.repositories.space_role_repository import SpaceRoleRepository
 from app.repositories.status_template_repository import StatusTemplateRepository
 from app.repositories.user_repository import UserRepository
 from app.services.audit_service import AuditService
@@ -20,8 +21,7 @@ from app.utils.datetime import utcnow
 
 # Project-member role keys → friendly label for notifications.
 ROLE_LABELS = {
-    "project_manager": "Project Manager", "team_lead": "Team Lead",
-    "developer": "Developer", "tester": "Tester",
+    "super_admin": "Super Admin", "admin": "Admin", "employee": "Employee",
 }
 
 # Tasks considered "done" for progress calculations.
@@ -52,6 +52,7 @@ class ProjectService:
         audit: AuditService,
         notifications: NotificationService,
         status_templates: "StatusTemplateRepository | None" = None,
+        space_roles: "SpaceRoleRepository | None" = None,
     ):
         self.projects = projects
         self.members = members
@@ -59,6 +60,7 @@ class ProjectService:
         self.audit = audit
         self.notifications = notifications
         self.status_templates = status_templates
+        self.space_roles = space_roles
 
     async def _get_or_404(self, project_id: str) -> dict[str, Any]:
         if not is_valid_object_id(project_id):
@@ -102,7 +104,7 @@ class ProjectService:
         if actor.user_id:
             await self.members.add(
                 project_id=pid, user_id=actor.user_id,
-                project_role="project_manager", added_by=actor.user_id, added_at=now,
+                project_role="admin", added_by=actor.user_id, added_at=now,
             )
 
         await self.audit.log(
@@ -337,6 +339,63 @@ class ProjectService:
         await self.audit.log(
             actor_id=actor.user_id, action="project.member_removed", entity_type="project",
             entity_id=project_id, metadata={"user_id": user_id}, ip=actor.ip,
+        )
+
+    # --- custom space roles (Jira-style role management) ---
+    @staticmethod
+    def _serialize_role(doc: dict[str, Any]) -> dict[str, Any]:
+        out = dict(doc)
+        out["_id"] = str(doc["_id"])
+        out["project_id"] = str(doc["project_id"])
+        out["is_system"] = False
+        return out
+
+    async def list_space_roles(self, project_id: str, actor: ActorContext) -> list[dict[str, Any]]:
+        project = await self._get_or_404(project_id)
+        if not await self._can_view(project, actor):
+            raise NotFoundError("Project not found")
+        if not self.space_roles:
+            return []
+        docs = await self.space_roles.list_for_project(project_id)
+        return [self._serialize_role(d) for d in docs]
+
+    async def create_space_role(
+        self, project_id: str, data: dict[str, Any], actor: ActorContext
+    ) -> dict[str, Any]:
+        project = await self._get_or_404(project_id)
+        if not await self._can_manage_members(project_id, project, actor):
+            raise PermissionDeniedError("You must be a member of this space to manage roles")
+        if not self.space_roles:
+            raise ValidationError("Role management is unavailable")
+        doc = {
+            "project_id": to_object_id(project_id),
+            "name": data["name"].strip(),
+            "description": (data.get("description") or "").strip() or None,
+            "permissions": list(dict.fromkeys(data.get("permissions") or [])),
+            "is_deleted": False,
+            "created_at": utcnow(),
+            "updated_at": utcnow(),
+        }
+        created = await self.space_roles.insert_one(doc)
+        await self.audit.log(
+            actor_id=actor.user_id, action="project.role_created", entity_type="project",
+            entity_id=project_id, metadata={"name": doc["name"]}, ip=actor.ip,
+        )
+        return self._serialize_role(created)
+
+    async def delete_space_role(self, project_id: str, role_id: str, actor: ActorContext) -> None:
+        project = await self._get_or_404(project_id)
+        if not await self._can_manage_members(project_id, project, actor):
+            raise PermissionDeniedError("You must be a member of this space to manage roles")
+        if not self.space_roles:
+            raise NotFoundError("Role not found")
+        role = await self.space_roles.find_by_id(role_id)
+        if not role or role.get("is_deleted") or str(role.get("project_id")) != str(to_object_id(project_id)):
+            raise NotFoundError("Role not found")
+        await self.space_roles.soft_delete_by_id(role_id, when=utcnow())
+        await self.audit.log(
+            actor_id=actor.user_id, action="project.role_deleted", entity_type="project",
+            entity_id=project_id, metadata={"role_id": role_id}, ip=actor.ip,
         )
 
     async def list_members(self, project_id: str, actor: ActorContext) -> list[dict[str, Any]]:
