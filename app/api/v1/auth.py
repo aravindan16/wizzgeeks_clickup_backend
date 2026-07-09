@@ -81,6 +81,8 @@ async def me(current: CurrentUserDep):
         status=current.status,
         avatar_url=current.raw.get("avatar_url"),
         avatar_color=current.raw.get("avatar_color"),
+        theme=current.raw.get("theme"),
+        accent=current.raw.get("accent"),
     )
 
 

@@ -84,17 +84,10 @@ class ListService:
         await self._assert_member(space_id, project, actor)
         now = utcnow()
         order = await self.lists.count_for_space(space_id)
-        # Task-ID prefix for this List (e.g. FE → FE-1). Uppercased + uniqueness-checked.
-        key = (data.get("key") or "").strip().upper()
-        if not key:
-            raise ValidationError("List key is required")
-        existing = await self.lists.find_one({"space_id": to_object_id(space_id), "key": key, "is_deleted": {"$ne": True}})
-        if existing:
-            raise ValidationError(f"A list with key '{key}' already exists in this space")
+        # Lists have no key of their own — task IDs use the Space's key (e.g. WR-1).
         doc = {
             "space_id": to_object_id(space_id),
             "name": data["name"].strip(),
-            "key": key,
             "task_counter": 0,
             "privacy": data.get("privacy", "public"),
             "owner_id": to_object_id(actor.user_id) if actor.user_id else None,

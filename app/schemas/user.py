@@ -35,5 +35,7 @@ class UserResponse(ORMModel):
     manager_id: str | None = None
     avatar_url: str | None = None
     avatar_color: str | None = None
+    theme: str | None = None     # 'light' | 'dark' | 'auto'
+    accent: str | None = None    # accent colour key
     created_at: object | None = None
     updated_at: object | None = None

@@ -13,7 +13,6 @@ StatusMode = Literal["inherit", "custom"]
 class ListCreate(BaseModel):
     space_id: str
     name: str = Field(min_length=1, max_length=120)
-    key: str = Field(min_length=2, max_length=10, pattern=r"^[A-Za-z][A-Za-z0-9]*$")  # task-ID prefix (e.g. FE → FE-1)
     privacy: Privacy = "public"
     template: str | None = None  # optional starter template id (reserved)
 

@@ -18,6 +18,8 @@ class UserPublic(ORMModel):
     status: str
     avatar_url: str | None = None
     avatar_color: str | None = None
+    theme: str | None = None     # 'light' | 'dark' | 'auto'
+    accent: str | None = None    # accent colour key
 
 
 class TokenResponse(BaseModel):

@@ -21,6 +21,8 @@ ALLOWED_AVATAR_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "i
 class PreferencesUpdate(BaseModel):
     in_app: bool | None = None
     email: bool | None = None
+    theme: str | None = None    # 'light' | 'dark' | 'auto' — UI appearance
+    accent: str | None = None   # accent/theme colour key (e.g. 'pink')
 
 router = APIRouter()
 

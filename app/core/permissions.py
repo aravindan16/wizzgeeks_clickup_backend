@@ -49,6 +49,12 @@ PERMISSION_CATALOG: list[dict] = [
         {"key": "task.comment", "label": "Comment on tasks"},
         {"key": "task.attachments", "label": "Manage task attachments"},
     ]},
+    {"key": "customfields", "module": "Custom fields", "permissions": [
+        {"key": "customfield.create", "label": "Create custom fields"},
+        {"key": "customfield.read", "label": "View custom fields"},
+        {"key": "customfield.update", "label": "Edit custom fields"},
+        {"key": "customfield.delete", "label": "Delete custom fields"},
+    ]},
     {"key": "views", "module": "Views", "permissions": [
         {"key": "view.create", "label": "Create views"},
         {"key": "view.update", "label": "Edit views"},
@@ -107,7 +113,8 @@ def _module(*keys: str) -> list[str]:
 # gate, enforced in the services) — manage lists/views/tasks, collaborate, own reports.
 EMPLOYEE_PERMS = sorted(set(
     ["project.read", "project.create", "comment.read"]
-    + _module("lists")   # list.create / read / update / delete
+    + _module("lists")          # list.create / read / update / delete
+    + _module("customfields")   # customfield.create / read / update / delete
     + _module("views")   # view.create / update / delete
     + ["task.create", "task.read", "task.update", "task.status.update",
        "task.priority.update", "task.assign", "task.comment", "task.attachments"]
