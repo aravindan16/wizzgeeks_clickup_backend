@@ -11,6 +11,17 @@ from app.utils.datetime import utcnow
 logger = logging.getLogger(__name__)
 
 
+async def cleanup_user_fields(db) -> None:
+    """Drop the retired profile fields (designation / department / timezone) from
+    every user document. Idempotent."""
+    res = await db["users"].update_many(
+        {"$or": [{"designation": {"$exists": True}}, {"department": {"$exists": True}}, {"timezone": {"$exists": True}}]},
+        {"$unset": {"designation": "", "department": "", "timezone": ""}},
+    )
+    if res.modified_count:
+        logger.info("Removed designation/department/timezone from %d users", res.modified_count)
+
+
 async def seed_permissions(db) -> None:
     """Mirror the permission catalog into the `permissions` collection so it is
     DB-driven (the frontend reads permissions from the DB, never hardcoded)."""
@@ -93,9 +104,6 @@ async def seed_superadmin(db) -> None:
             "full_name": settings.FIRST_SUPERADMIN_NAME,
             "role_ids": [super_role["_id"]],
             "manager_id": None,
-            "designation": "System Administrator",
-            "department": "IT",
-            "timezone": "UTC",
             "avatar_url": None,
             "status": "active",
             "notification_prefs": {"in_app": True, "email": False},
@@ -133,7 +141,7 @@ async def seed_sample_projects(db) -> None:
     now = utcnow()
 
     # A couple of sample teammates (idempotent by email).
-    async def ensure_user(email, name, role_key, designation):
+    async def ensure_user(email, name, role_key, _designation=None):
         existing = await users.find_by_email(email)
         if existing:
             return existing["_id"]
@@ -141,8 +149,7 @@ async def seed_sample_projects(db) -> None:
         created = await users.insert_one({
             "email": email, "password_hash": hash_password("Password123!"),
             "full_name": name, "role_ids": [role["_id"]] if role else [],
-            "manager_id": None, "designation": designation, "department": "Engineering",
-            "timezone": "UTC", "avatar_url": None, "status": "active",
+            "manager_id": None, "avatar_url": None, "status": "active",
             "notification_prefs": {"in_app": True, "email": False},
             "is_deleted": False, "deleted_at": None, "last_login_at": None,
             "password_changed_at": now, "created_at": now, "updated_at": now,
@@ -319,6 +326,7 @@ async def seed_dashboard_demo(db) -> None:
 async def run_seed(db) -> None:
     await seed_permissions(db)
     await seed_roles(db)
+    await cleanup_user_fields(db)
     await seed_superadmin(db)
     await seed_sample_projects(db)
     await seed_sample_tasks(db)

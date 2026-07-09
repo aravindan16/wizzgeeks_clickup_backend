@@ -44,7 +44,19 @@ class UserDashboardService:
             raise NotFoundError("Dashboard not found")
         return _serialize(doc)
 
+    async def _name_taken(self, owner_id: str, name: str, exclude_id: str | None = None) -> bool:
+        query: dict[str, Any] = {
+            "owner_id": to_object_id(owner_id),
+            "name": {"$regex": f"^{re.escape(name.strip())}$", "$options": "i"},
+            "is_deleted": {"$ne": True},
+        }
+        if exclude_id:
+            query["_id"] = {"$ne": to_object_id(exclude_id)}
+        return await self.repo.find_one(query) is not None
+
     async def create(self, owner_id: str, *, name: str, cards: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        if await self._name_taken(owner_id, name):
+            raise ConflictError("A dashboard with this name already exists")
         now = utcnow()
         doc = {
             "owner_id": to_object_id(owner_id),
@@ -62,6 +74,8 @@ class UserDashboardService:
                      cards: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         update: dict[str, Any] = {"updated_at": utcnow()}
         if name is not None:
+            if await self._name_taken(user_id, name, exclude_id=dashboard_id):
+                raise ConflictError("A dashboard with this name already exists")
             update["name"] = name.strip() or "Dashboard"
         if cards is not None:
             update["cards"] = cards
