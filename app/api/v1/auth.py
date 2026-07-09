@@ -79,9 +79,8 @@ async def me(current: CurrentUserDep):
         roles=current.roles,
         permissions=sorted(current.permissions),
         status=current.status,
-        designation=current.raw.get("designation"),
-        department=current.raw.get("department"),
         avatar_url=current.raw.get("avatar_url"),
+        avatar_color=current.raw.get("avatar_color"),
     )
 
 

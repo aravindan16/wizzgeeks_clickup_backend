@@ -43,9 +43,8 @@ def _public_user(user: dict[str, Any], roles: list[str], perms: set[str]) -> dic
         "roles": roles,
         "permissions": sorted(perms),
         "status": user["status"],
-        "designation": user.get("designation"),
-        "department": user.get("department"),
         "avatar_url": user.get("avatar_url"),
+        "avatar_color": user.get("avatar_color"),
     }
 
 

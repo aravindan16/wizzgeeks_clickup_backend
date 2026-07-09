@@ -34,11 +34,10 @@ async def list_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     status: str | None = None,
-    department: str | None = None,
     search: str | None = None,
 ):
     items, total = await service.list_users(
-        skip=skip, limit=limit, status=status, department=department, search=search
+        skip=skip, limit=limit, status=status, search=search
     )
     return PaginatedResponse(items=items, total=total, skip=skip, limit=limit)
 

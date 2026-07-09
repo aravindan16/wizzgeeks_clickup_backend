@@ -72,9 +72,6 @@ class UserService:
             "full_name": data["full_name"],
             "role_ids": role_ids,
             "manager_id": to_object_id(manager_id) if manager_id else None,
-            "designation": data.get("designation"),
-            "department": data.get("department"),
-            "timezone": data.get("timezone") or "UTC",
             "avatar_url": None,
             "status": "active",
             "notification_prefs": {"in_app": True, "email": False},
@@ -106,12 +103,10 @@ class UserService:
         return _serialize(user, await self._role_keys_for(user.get("role_ids", [])))
 
     async def list_users(self, *, skip: int, limit: int, status: str | None,
-                         department: str | None, search: str | None) -> tuple[list[dict], int]:
+                         search: str | None) -> tuple[list[dict], int]:
         query: dict[str, Any] = {"is_deleted": {"$ne": True}}
         if status:
             query["status"] = status
-        if department:
-            query["department"] = department
         if search:
             query["$or"] = [
                 {"full_name": {"$regex": search, "$options": "i"}},
@@ -133,7 +128,7 @@ class UserService:
 
         update: dict[str, Any] = {"updated_at": utcnow()}
         changed_fields: list[str] = []
-        for field in ("full_name", "designation", "department", "timezone", "avatar_url"):
+        for field in ("full_name", "avatar_url", "avatar_color"):
             if data.get(field) is not None:
                 update[field] = data[field]
                 changed_fields.append(field)
