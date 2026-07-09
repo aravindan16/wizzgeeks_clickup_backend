@@ -225,9 +225,16 @@ class UserService:
         user = await self.users.find_safe_by_id(user_id)
         if not user or user.get("is_deleted"):
             raise NotFoundError("User not found")
-        merged = {**(user.get("notification_prefs") or {}), **prefs}
-        updated = await self.users.update_by_id(
-            user_id, {"notification_prefs": merged, "updated_at": utcnow()})
+        prefs = dict(prefs)
+        # UI theme prefs are stored as top-level fields (returned on UserResponse so the
+        # frontend can restore them on any device); the rest are notification prefs.
+        update: dict[str, Any] = {"updated_at": utcnow()}
+        for key in ("theme", "accent"):
+            if key in prefs:
+                update[key] = prefs.pop(key)
+        if prefs:
+            update["notification_prefs"] = {**(user.get("notification_prefs") or {}), **prefs}
+        updated = await self.users.update_by_id(user_id, update)
         updated.pop("password_hash", None)
         return _serialize(updated, await self._role_keys_for(updated.get("role_ids", [])))
 

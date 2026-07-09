@@ -210,16 +210,20 @@ class CustomFieldService:
         # that is "Related to" a specific List shows on THAT (target) List — the List
         # it points to — not the List where it was created.
         if list_id:
+            # NOTE: _base() stringifies _id, so `have` holds string ids — compare with
+            # str(f["_id"]) here (raw docs carry ObjectId _ids). Without the str(), the
+            # guard never matches and a space relationship field "related to" this List
+            # gets emitted twice (once inherited above, once here).
             have = {f["_id"] for f in out}
             for f in await self.fields.list_all_in_space(space_id):
-                if f["_id"] in have or f.get("type") != "relationship":
+                if str(f["_id"]) in have or f.get("type") != "relationship":
                     continue
                 cfg = f.get("config") or {}
                 if cfg.get("related_to") == "list" and str(cfg.get("list_id")) == list_id:
                     owner = await self.lists.find_by_id(str(f["list_id"])) if f.get("list_id") else None
                     out.append(self._base(f, inherited=False, location=(owner or {}).get("name") or lst["name"],
                                           created_by_name=await resolve(f.get("created_by"))))
-                    have.add(f["_id"])
+                    have.add(str(f["_id"]))
 
             # Still surface any relationship field this specific task is already linked
             # under but that isn't otherwise shown (e.g. workspace-scoped fields) so an
