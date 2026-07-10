@@ -138,10 +138,7 @@ async def assign_task(
     payload: AssignRequest,
     request: Request,
     service: TaskServiceDep,
-    # TODO: Re-introduce role-based permission validation in a future phase
-    # (was: Depends(require("task.assign"))). For now any authenticated user
-    # may assign/unassign tasks — only login is required.
-    actor: Annotated[CurrentUser, Depends(get_current_user)],
+    actor: Annotated[CurrentUser, Depends(require("task.assign"))],
 ):
     return await service.assign(task_id, payload.assignee_id, make_actor(actor, request))
 
@@ -304,7 +301,9 @@ async def add_comment(
     payload: CommentCreate,
     request: Request,
     service: CommentServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("comment.create"))],
+    # "Comment on tasks" (task.comment) is the toggle users see in the Tasks module,
+    # so gate commenting on that (not the separate comment.create).
+    actor: Annotated[CurrentUser, Depends(require("task.comment"))],
 ):
     return await service.add_comment(task_id, payload.body, make_actor(actor, request))
 

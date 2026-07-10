@@ -19,3 +19,7 @@ class LabelRepository(BaseRepository):
 
     async def find_by_name(self, name_lower: str) -> dict[str, Any] | None:
         return await self.find_one({"name_lower": name_lower, "is_deleted": {"$ne": True}})
+
+    async def find_any_by_name(self, name_lower: str) -> dict[str, Any] | None:
+        """Match by name INCLUDING soft-deleted rows (the unique index covers them)."""
+        return await self.find_one({"name_lower": name_lower})
