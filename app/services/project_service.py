@@ -416,6 +416,8 @@ class ProjectService:
             "user_id": str(member["user_id"]),
             "full_name": user.get("full_name") if user else None,
             "email": user.get("email") if user else None,
+            "avatar_color": user.get("avatar_color") if user else None,
+            "avatar_url": user.get("avatar_url") if user else None,
             "project_role": member["project_role"],
             "added_at": member.get("added_at"),
         }

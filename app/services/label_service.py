@@ -57,6 +57,14 @@ class LabelService:
         if existing:
             return _serialize(existing)  # get-or-create — labels are unique
 
+        # A soft-deleted label with this name still occupies the unique index — bring
+        # it back instead of failing to insert a duplicate.
+        deleted = await self.repo.find_any_by_name(name_lower)
+        if deleted:
+            restored = await self.repo.update_by_id(
+                str(deleted["_id"]), {"is_deleted": False, "deleted_at": None, "updated_at": utcnow()})
+            return _serialize(restored or deleted)
+
         now = utcnow()
         doc = {
             "name": name,
@@ -70,10 +78,15 @@ class LabelService:
         try:
             created = await self.repo.insert_one(doc)
         except DuplicateKeyError:
-            # Raced with another create of the same name — return the winner.
-            existing = await self.repo.find_by_name(name_lower)
+            # Raced with another create (or a soft-deleted row holds the name) — return
+            # / restore the existing one.
+            existing = await self.repo.find_any_by_name(name_lower)
             if not existing:
                 raise ValidationError("Could not create label")
+            if existing.get("is_deleted"):
+                restored = await self.repo.update_by_id(
+                    str(existing["_id"]), {"is_deleted": False, "deleted_at": None, "updated_at": utcnow()})
+                return _serialize(restored or existing)
             return _serialize(existing)
         return _serialize(created)
 
