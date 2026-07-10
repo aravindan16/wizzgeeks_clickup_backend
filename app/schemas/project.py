@@ -35,7 +35,7 @@ class SaveTemplateRequest(BaseModel):
 class ProjectUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
-    icon: str | None = Field(default=None, max_length=16)  # emoji shown instead of the initial
+    icon: str | None = Field(default=None, max_length=64)  # "FaRocket|#7c3aed" (icon + colour) or emoji
     status: ProjectStatus | None = None
     start_date: str | None = None
     end_date: str | None = None

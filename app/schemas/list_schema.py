@@ -20,7 +20,7 @@ class ListCreate(BaseModel):
 class ListUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     privacy: Privacy | None = None
-    icon: str | None = Field(default=None, max_length=16)  # emoji shown instead of the initial
+    icon: str | None = Field(default=None, max_length=64)  # "FaRocket|#7c3aed" (icon + colour) or emoji
     # Per-List task statuses: inherit the Space workflow, or use a custom one.
     status_mode: StatusMode | None = None
     statuses: list[StatusItem] | None = None
