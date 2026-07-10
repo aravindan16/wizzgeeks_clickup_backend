@@ -70,6 +70,8 @@ class MemberResponse(ORMModel):
     user_id: str
     full_name: str | None = None
     email: str | None = None
+    avatar_color: str | None = None
+    avatar_url: str | None = None
     project_role: str
     added_at: Any | None = None
 
