@@ -45,6 +45,8 @@ def _public_user(user: dict[str, Any], roles: list[str], perms: set[str]) -> dic
         "status": user["status"],
         "avatar_url": user.get("avatar_url"),
         "avatar_color": user.get("avatar_color"),
+        "theme": user.get("theme"),
+        "accent": user.get("accent"),
     }
 
 
