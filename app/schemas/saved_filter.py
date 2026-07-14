@@ -23,6 +23,12 @@ class SavedFilterUpdate(BaseModel):
     conj: str | None = None
 
 
+class FilterEvaluate(BaseModel):
+    """Evaluate an ad-hoc rule tree (live builder preview)."""
+    cards: list[dict[str, Any]] = []
+    conj: str = "AND"
+
+
 class SavedFilterResponse(ORMModel):
     id: str
     name: str
