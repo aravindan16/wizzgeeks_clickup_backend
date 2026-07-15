@@ -149,8 +149,12 @@ class ProjectService:
 
     @staticmethod
     def _can_see_all(actor: ActorContext) -> bool:
-        """Admins/super-admins (those who can delete projects) see every space."""
-        return actor.has("project.delete")
+        """Space visibility is STRICTLY membership-based for EVERYONE — including admins
+        and super admins. A space is only visible to the user who created it (its owner)
+        or an active member; nobody sees a space they neither created nor belong to.
+        Roles' project.* permissions grant the ABILITY to act, but membership decides
+        WHICH spaces are visible."""
+        return False
 
     async def _can_view(self, project: dict[str, Any], actor: ActorContext) -> bool:
         if self._can_see_all(actor) or self._is_owner(project, actor):
@@ -404,10 +408,14 @@ class ProjectService:
             raise NotFoundError("Project not found")
         members = await self.members.list_active_by_project(project_id)
         user_ids = [m["user_id"] for m in members]
-        users = await self.users.find_many({"_id": {"$in": user_ids}}, limit=500,
-                                           projection={"password_hash": 0})
+        # Only surface members whose user is still active — a deleted/suspended user
+        # must not appear as a ghost row (blank name) here or in the assignee picker.
+        users = await self.users.find_many(
+            {"_id": {"$in": user_ids}, "is_deleted": {"$ne": True}, "status": "active"},
+            limit=500, projection={"password_hash": 0})
         by_id = {str(u["_id"]): u for u in users}
-        return [self._member_view(m, by_id.get(str(m["user_id"]))) for m in members]
+        return [self._member_view(m, by_id[str(m["user_id"])])
+                for m in members if str(m["user_id"]) in by_id]
 
     @staticmethod
     def _member_view(member: dict[str, Any], user: dict[str, Any] | None) -> dict[str, Any]:

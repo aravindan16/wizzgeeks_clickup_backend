@@ -239,90 +239,6 @@ async def seed_sample_tasks(db) -> None:
     logger.info("Seeded %d sample tasks on project DAT", len(samples))
 
 
-async def seed_sample_daily_updates(db) -> None:
-    """Development-only: a few daily updates (incl. a blocker) for the sample team."""
-    if settings.ENVIRONMENT != "development":
-        return
-
-    from datetime import timedelta
-
-    from app.repositories.project_repository import ProjectRepository
-
-    users = UserRepository(db)
-    projects = ProjectRepository(db)
-
-    project = await projects.find_by_key("DAT")
-    if not project:
-        return
-    if await db.daily_updates.count_documents({}) > 0:
-        return
-
-    dev = await users.find_by_email("dev@dailyactivity.local")
-    qa = await users.find_by_email("qa@dailyactivity.local")
-    if not dev:
-        return
-
-    task1 = await db.tasks.find_one({"key": "DAT-1"})
-    task3 = await db.tasks.find_one({"key": "DAT-3"})
-    now = utcnow()
-    today = now.strftime("%Y-%m-%d")
-    yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
-
-    def entry(task, work, hours, blockers=None, status="in_progress"):
-        return {
-            "project_id": project["_id"],
-            "task_id": task["_id"] if task else None,
-            "work_done": work, "hours_spent": hours,
-            "blockers": blockers, "status": status,
-        }
-
-    docs = [
-        {"user_id": dev["_id"], "date": yesterday,
-         "entries": [entry(task1, "Configured CI runners", 4.0)],
-         "tomorrow_plan": "Finish pipeline", "total_hours": 4.0, "has_blockers": False},
-        {"user_id": dev["_id"], "date": today,
-         "entries": [entry(task1, "Pipeline caching + tests", 3.5, "Waiting on infra secrets", "blocked")],
-         "tomorrow_plan": "Unblock and deploy", "total_hours": 3.5, "has_blockers": True},
-    ]
-    if qa:
-        docs.append({"user_id": qa["_id"], "date": today,
-                     "entries": [entry(task3, "Wrote 12 API tests", 5.0, None, "in_progress")],
-                     "tomorrow_plan": "Cover edge cases", "total_hours": 5.0, "has_blockers": False})
-
-    for d in docs:
-        d.update({"mood": "good", "submitted_at": now, "created_at": now, "updated_at": now})
-        await db.daily_updates.insert_one(d)
-    logger.info("Seeded %d sample daily updates", len(docs))
-
-
-async def seed_dashboard_demo(db) -> None:
-    """Development-only: manager relationships + an overdue task so dashboards
-    have meaningful team/delay data. Idempotent (uses targeted updates)."""
-    if settings.ENVIRONMENT != "development":
-        return
-    from datetime import timedelta
-
-    users = UserRepository(db)
-    admin = await users.find_by_email(settings.FIRST_SUPERADMIN_EMAIL)
-    lead = await users.find_by_email("lead@dailyactivity.local")
-    dev = await users.find_by_email("dev@dailyactivity.local")
-    qa = await users.find_by_email("qa@dailyactivity.local")
-    if not (admin and lead and dev and qa):
-        return
-
-    # Tara Lead manages Dan & Quinn; admin manages Tara.
-    await db.users.update_one({"_id": dev["_id"]}, {"$set": {"manager_id": lead["_id"]}})
-    await db.users.update_one({"_id": qa["_id"]}, {"$set": {"manager_id": lead["_id"]}})
-    await db.users.update_one({"_id": lead["_id"]}, {"$set": {"manager_id": admin["_id"]}})
-
-    # Make one open task overdue for the "delayed tasks" widget.
-    overdue_date = (utcnow() - timedelta(days=3)).strftime("%Y-%m-%d")
-    await db.tasks.update_one(
-        {"key": "DAT-1"}, {"$set": {"due_date": overdue_date}}
-    )
-    logger.info("Seeded dashboard demo relationships + overdue task")
-
-
 async def run_seed(db) -> None:
     await seed_permissions(db)
     await seed_roles(db)
@@ -330,5 +246,3 @@ async def run_seed(db) -> None:
     await seed_superadmin(db)
     await seed_sample_projects(db)
     await seed_sample_tasks(db)
-    await seed_sample_daily_updates(db)
-    await seed_dashboard_demo(db)

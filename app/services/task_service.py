@@ -24,7 +24,6 @@ from app.repositories.list_repository import ListRepository
 from app.repositories.custom_field_repository import CustomFieldRepository
 from app.repositories.task_repository import TaskRepository
 from app.repositories.user_repository import UserRepository
-from app.repositories.worklog_repository import WorklogRepository
 from app.services.audit_service import AuditService
 from app.services.notification_service import NotificationService
 from app.services.user_service import ActorContext
@@ -66,7 +65,6 @@ class TaskService:
         assignments: TaskAssignmentRepository,
         audit: AuditService,
         notifications: NotificationService,
-        worklogs: WorklogRepository,
         lists: "ListRepository | None" = None,
         custom_fields: "CustomFieldRepository | None" = None,
     ):
@@ -78,7 +76,6 @@ class TaskService:
         self.assignments = assignments
         self.audit = audit
         self.notifications = notifications
-        self.worklogs = worklogs
         self.lists = lists
         self.custom_fields = custom_fields
 
@@ -448,44 +445,6 @@ class TaskService:
         await self._assert_project_access(str(task["project_id"]), actor)
         updated = await self.tasks.remove_watcher(task_id, user_id)
         return _serialize(updated)
-
-    # --- worklog ---
-    async def log_work(
-        self, task_id: str, hours: float, actor: ActorContext, note: str | None = None
-    ) -> dict[str, Any]:
-        task = await self._get_task_or_404(task_id)
-        await self._assert_project_access(str(task["project_id"]), actor)
-        now = utcnow()
-        await self.worklogs.insert_one({
-            "task_id": to_object_id(task_id),
-            "user_id": to_object_id(actor.user_id) if actor.user_id else None,
-            "hours": hours,
-            "note": (note.strip() if note and note.strip() else None),
-            "created_at": now,
-        })
-        updated = await self.tasks.increment_actual_hours(task_id, hours)
-        await self.audit.log(actor_id=actor.user_id, action="task.worklog", entity_type="task",
-                             entity_id=task_id, metadata={"hours": hours}, ip=actor.ip)
-        return _serialize(updated)
-
-    async def list_worklogs(self, task_id: str, actor: ActorContext) -> list[dict[str, Any]]:
-        task = await self._get_task_or_404(task_id)
-        await self._assert_project_access(str(task["project_id"]), actor)
-        rows = await self.worklogs.list_for_task(task_id)
-        out = []
-        for r in rows:
-            uid = str(r["user_id"]) if r.get("user_id") else None
-            name = None
-            if uid:
-                u = await self.users.find_safe_by_id(uid)
-                name = u.get("full_name") if u else None
-            out.append({
-                "_id": str(r["_id"]), "task_id": str(r["task_id"]),
-                "user_id": uid, "user_name": name,
-                "hours": r.get("hours"), "note": r.get("note"),
-                "created_at": r.get("created_at"),
-            })
-        return out
 
     # --- subtasks ---
     async def list_subtasks(self, task_id: str, actor: ActorContext) -> list[dict[str, Any]]:

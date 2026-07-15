@@ -133,6 +133,15 @@ class UserService:
                 update[field] = data[field]
                 changed_fields.append(field)
 
+        if data.get("email") is not None:
+            email = data["email"].strip().lower()
+            if email != user.get("email"):
+                existing = await self.users.find_by_email(email)
+                if existing and str(existing["_id"]) != user_id:
+                    raise ConflictError("A user with this email already exists")
+                update["email"] = email
+                changed_fields.append("email")
+
         role_change: dict[str, Any] | None = None
         if data.get("role_keys") is not None:
             try:

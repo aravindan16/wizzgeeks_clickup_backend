@@ -80,15 +80,6 @@ async def ensure_indexes() -> None:
         [("assignee_id", ASCENDING), ("is_active", ASCENDING)], name="ta_assignee_active"
     )
 
-    # daily_updates
-    await db.daily_updates.create_index(
-        [("user_id", ASCENDING), ("date", DESCENDING)], unique=True, name="uniq_user_date"
-    )
-    await db.daily_updates.create_index([("date", DESCENDING)], name="du_date")
-    await db.daily_updates.create_index(
-        [("has_blockers", ASCENDING), ("date", DESCENDING)], name="du_blockers"
-    )
-
     # notifications
     await db.notifications.create_index(
         [("recipient_id", ASCENDING), ("is_read", ASCENDING), ("created_at", DESCENDING)],
