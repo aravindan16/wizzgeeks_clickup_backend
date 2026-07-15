@@ -28,10 +28,11 @@ async def search_users(current: CurrentUserDep, service: ServiceDep, q: str = ""
 
 
 # Evaluate an ad-hoc rule tree server-side (live builder preview). Static route, so
-# declared before /{filter_id}. Returns matched tasks + the reference data to render them.
+# declared before /{filter_id}. Returns one page of matched tasks + total + reference data.
 @router.post("/evaluate")
-async def evaluate_filter(payload: FilterEvaluate, current: CurrentUserDep, service: ServiceDep):
-    return await service.evaluate(payload.cards, payload.conj, current.id)
+async def evaluate_filter(payload: FilterEvaluate, current: CurrentUserDep, service: ServiceDep,
+                          skip: int = 0, limit: int = 0):
+    return await service.evaluate(payload.cards, payload.conj, current.id, skip, limit)
 
 
 @router.post("", response_model=SavedFilterResponse)
@@ -44,10 +45,11 @@ async def get_filter(filter_id: str, current: CurrentUserDep, service: ServiceDe
     return await service.get(filter_id, current.id)
 
 
-# One call: the saved filter's definition AND its evaluated results + reference data.
+# One call: the saved filter's definition AND one page of its evaluated results.
 @router.get("/{filter_id}/results")
-async def filter_results(filter_id: str, current: CurrentUserDep, service: ServiceDep):
-    return await service.results(filter_id, current.id)
+async def filter_results(filter_id: str, current: CurrentUserDep, service: ServiceDep,
+                         skip: int = 0, limit: int = 0):
+    return await service.results(filter_id, current.id, skip, limit)
 
 
 @router.patch("/{filter_id}", response_model=SavedFilterResponse)
