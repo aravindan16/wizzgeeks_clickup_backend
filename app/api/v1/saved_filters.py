@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from app.api.deps import CurrentUserDep, get_saved_filter_service
 from app.schemas.common import MessageResponse
 from app.schemas.saved_filter import (
-    FilterMemberAdd, FilterMemberList,
+    FilterEvaluate, FilterMemberAdd, FilterMemberList,
     SavedFilterCreate, SavedFilterList, SavedFilterResponse, SavedFilterUpdate,
 )
 from app.services.saved_filter_service import SavedFilterService
@@ -27,6 +27,13 @@ async def search_users(current: CurrentUserDep, service: ServiceDep, q: str = ""
     return {"items": await service.search_users(q)}
 
 
+# Evaluate an ad-hoc rule tree server-side (live builder preview). Static route, so
+# declared before /{filter_id}. Returns matched tasks + the reference data to render them.
+@router.post("/evaluate")
+async def evaluate_filter(payload: FilterEvaluate, current: CurrentUserDep, service: ServiceDep):
+    return await service.evaluate(payload.cards, payload.conj, current.id)
+
+
 @router.post("", response_model=SavedFilterResponse)
 async def create_filter(payload: SavedFilterCreate, current: CurrentUserDep, service: ServiceDep):
     return await service.create(current.id, name=payload.name, cards=payload.cards, conj=payload.conj)
@@ -35,6 +42,12 @@ async def create_filter(payload: SavedFilterCreate, current: CurrentUserDep, ser
 @router.get("/{filter_id}", response_model=SavedFilterResponse)
 async def get_filter(filter_id: str, current: CurrentUserDep, service: ServiceDep):
     return await service.get(filter_id, current.id)
+
+
+# One call: the saved filter's definition AND its evaluated results + reference data.
+@router.get("/{filter_id}/results")
+async def filter_results(filter_id: str, current: CurrentUserDep, service: ServiceDep):
+    return await service.results(filter_id, current.id)
 
 
 @router.patch("/{filter_id}", response_model=SavedFilterResponse)

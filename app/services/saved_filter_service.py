@@ -13,9 +13,26 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.exceptions import ConflictError, NotFoundError
 from app.repositories.base import to_object_id
+from app.repositories.list_repository import ListRepository
+from app.repositories.project_repository import ProjectRepository
 from app.repositories.saved_filter_repository import SavedFilterRepository
+from app.repositories.task_repository import TaskRepository
 from app.repositories.user_repository import UserRepository
+from app.services.filter_eval import task_matches
 from app.utils.datetime import utcnow
+
+# Upper bound on the candidate task set scanned when evaluating a filter server-side.
+_EVAL_TASK_CAP = 5000
+
+
+def _task_view(task: dict[str, Any]) -> dict[str, Any]:
+    """Task shape the Filters results table consumes (ids stringified)."""
+    out = dict(task)
+    out["_id"] = str(task["_id"])
+    for f in ("project_id", "reporter_id", "assignee_id", "parent_id", "list_id"):
+        if task.get(f):
+            out[f] = str(task[f])
+    return out
 
 
 def _serialize(doc: dict[str, Any]) -> dict[str, Any]:
@@ -36,6 +53,64 @@ class SavedFilterService:
     def __init__(self, db: AsyncIOMotorDatabase):
         self.repo = SavedFilterRepository(db)
         self.users = UserRepository(db)
+        self.tasks = TaskRepository(db)
+        self.projects = ProjectRepository(db)
+        self.lists = ListRepository(db)
+
+    # --- server-side evaluation (Filters results) ---
+    async def _evaluate(self, cards: list[dict[str, Any]], conj: str, user_id: str) -> dict[str, Any]:
+        """Evaluate a rule tree over all tasks and return the matched set plus the small
+        reference data the results table needs (spaces, lists, assignee users) — so the
+        frontend renders everything from ONE response instead of fanning out to several
+        endpoints and filtering in the browser."""
+        candidates = await self.tasks.list_tasks(
+            {"is_deleted": {"$ne": True}, "is_archived": {"$ne": True}},
+            skip=0, limit=_EVAL_TASK_CAP, sort=[("created_at", -1)],
+        )
+        matched = [t for t in candidates if task_matches(cards or [], conj, t, user_id)]
+
+        # Reference data limited to what the matched tasks actually reference.
+        space_ids = {t["project_id"] for t in matched if t.get("project_id")}
+        list_ids = {t["list_id"] for t in matched if t.get("list_id")}
+        assignee_ids = {t["assignee_id"] for t in matched if t.get("assignee_id")}
+
+        projects = await self.projects.find_many({"_id": {"$in": list(space_ids)}}, limit=1000) if space_ids else []
+        lists = await self.lists.find_many({"_id": {"$in": list(list_ids)}}, limit=2000) if list_ids else []
+        users = await self.users.find_many(
+            {"_id": {"$in": list(assignee_ids)}}, limit=2000,
+            projection={"full_name": 1, "email": 1, "avatar_color": 1, "avatar_url": 1},
+        ) if assignee_ids else []
+
+        spaces = [{"_id": str(p["_id"]), "key": p.get("key"), "name": p.get("name"),
+                   "statuses": p.get("statuses", []) or []} for p in projects]
+        # Lists link to their space via `space_id` (NOT project_id, which is a task field).
+        lists_out = [{"_id": str(l["_id"]), "name": l.get("name"),
+                      "spaceId": str(l["space_id"]) if l.get("space_id") else None,
+                      "status_mode": l.get("status_mode"), "statuses": l.get("statuses", []) or []}
+                     for l in lists]
+        users_out = [{"user_id": str(u["_id"]), "full_name": u.get("full_name"), "email": u.get("email"),
+                      "avatar_color": u.get("avatar_color"), "avatar_url": u.get("avatar_url")} for u in users]
+
+        return {
+            "items": [_task_view(t) for t in matched],
+            "total": len(matched),
+            "spaces": spaces,
+            "lists": lists_out,
+            "users": users_out,
+        }
+
+    async def evaluate(self, cards: list[dict[str, Any]], conj: str, user_id: str) -> dict[str, Any]:
+        """Evaluate an arbitrary rule tree (used by the live builder preview)."""
+        return await self._evaluate(cards, conj if conj in ("AND", "OR") else "AND", user_id)
+
+    async def results(self, filter_id: str, user_id: str) -> dict[str, Any]:
+        """Load a saved filter AND its evaluated results in a single call."""
+        doc = await self.repo.get_for_user(filter_id, user_id)
+        if not doc:
+            raise NotFoundError("Filter not found")
+        payload = await self._evaluate(doc.get("cards", []) or [], doc.get("conj", "AND"), user_id)
+        payload["filter"] = _serialize(doc)
+        return payload
 
     async def list(self, user_id: str) -> list[dict[str, Any]]:
         rows = await self.repo.list_for_user(user_id)
