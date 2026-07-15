@@ -92,7 +92,7 @@ async def system_status(
         db_ok = False
 
     counts = {}
-    for col in ["users", "projects", "tasks", "daily_updates", "notifications", "activity_logs"]:
+    for col in ["users", "projects", "tasks", "notifications", "activity_logs"]:
         counts[col] = await db[col].count_documents({})
 
     return {

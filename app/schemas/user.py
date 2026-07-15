@@ -13,6 +13,7 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
+    email: EmailStr | None = None
     full_name: str | None = Field(default=None, min_length=1, max_length=120)
     role_keys: list[str] | None = None
     manager_id: str | None = None

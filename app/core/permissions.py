@@ -73,20 +73,12 @@ PERMISSION_CATALOG: list[dict] = [
         {"key": "role.update", "label": "Edit roles"},
         {"key": "role.delete", "label": "Delete roles"},
     ]},
-    {"key": "daily", "module": "Daily updates", "permissions": [
-        {"key": "dailyupdate.create", "label": "Create daily updates"},
-        {"key": "dailyupdate.read.self", "label": "Read own daily updates"},
-        {"key": "dailyupdate.read.team", "label": "Read team daily updates"},
-        {"key": "dailyupdate.read.all", "label": "Read all daily updates"},
-        {"key": "dailyupdate.acknowledge", "label": "Acknowledge daily updates"},
-    ]},
     {"key": "reports", "module": "Reports", "permissions": [
         {"key": "report.view.self", "label": "View own reports"},
         {"key": "report.view.team", "label": "View team reports"},
         {"key": "report.view.all", "label": "View all reports"},
     ]},
     {"key": "dashboards", "module": "Dashboards", "permissions": [
-        {"key": "dashboard.view.team", "label": "View team dashboards"},
         {"key": "dashboard.view.admin", "label": "View admin dashboards"},
     ]},
     {"key": "admin", "module": "Administration", "permissions": [
@@ -119,7 +111,7 @@ EMPLOYEE_PERMS = sorted(set(
     + ["task.create", "task.read", "task.update", "task.status.update",
        "task.priority.update", "task.assign", "task.comment", "task.attachments"]
     + ["comment.create", "comment.update", "comment.delete"]
-    + ["dailyupdate.create", "dailyupdate.read.self", "report.view.self"]
+    + ["report.view.self"]
 ))
 
 # Admin: every explicit permission (manages users, spaces, tasks, roles, reports,
