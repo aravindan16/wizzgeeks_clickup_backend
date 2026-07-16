@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import CurrentUserDep, get_saved_filter_service
+from app.api.deps import CurrentUser, CurrentUserDep, get_saved_filter_service, require
 from app.schemas.common import MessageResponse
 from app.schemas.saved_filter import (
     FilterEvaluate, FilterMemberAdd, FilterMemberList,
@@ -28,10 +28,11 @@ async def search_users(current: CurrentUserDep, service: ServiceDep, q: str = ""
 
 
 # Evaluate an ad-hoc rule tree server-side (live builder preview). Static route, so
-# declared before /{filter_id}. Returns matched tasks + the reference data to render them.
+# declared before /{filter_id}. Returns one page of matched tasks + total + reference data.
 @router.post("/evaluate")
-async def evaluate_filter(payload: FilterEvaluate, current: CurrentUserDep, service: ServiceDep):
-    return await service.evaluate(payload.cards, payload.conj, current.id)
+async def evaluate_filter(payload: FilterEvaluate, current: CurrentUserDep, service: ServiceDep,
+                          skip: int = 0, limit: int = 0):
+    return await service.evaluate(payload.cards, payload.conj, current.id, skip, limit)
 
 
 @router.post("", response_model=SavedFilterResponse)
@@ -44,10 +45,11 @@ async def get_filter(filter_id: str, current: CurrentUserDep, service: ServiceDe
     return await service.get(filter_id, current.id)
 
 
-# One call: the saved filter's definition AND its evaluated results + reference data.
+# One call: the saved filter's definition AND one page of its evaluated results.
 @router.get("/{filter_id}/results")
-async def filter_results(filter_id: str, current: CurrentUserDep, service: ServiceDep):
-    return await service.results(filter_id, current.id)
+async def filter_results(filter_id: str, current: CurrentUserDep, service: ServiceDep,
+                         skip: int = 0, limit: int = 0):
+    return await service.results(filter_id, current.id, skip, limit)
 
 
 @router.patch("/{filter_id}", response_model=SavedFilterResponse)
@@ -67,10 +69,12 @@ async def list_members(filter_id: str, current: CurrentUserDep, service: Service
 
 
 @router.post("/{filter_id}/members", response_model=FilterMemberList)
-async def add_member(filter_id: str, payload: FilterMemberAdd, current: CurrentUserDep, service: ServiceDep):
+async def add_member(filter_id: str, payload: FilterMemberAdd, service: ServiceDep,
+                     current: Annotated[CurrentUser, Depends(require("filter.member.add"))]):
     return {"items": await service.add_member(filter_id, current.id, member_user_id=payload.user_id)}
 
 
 @router.delete("/{filter_id}/members/{user_id}", response_model=FilterMemberList)
-async def remove_member(filter_id: str, user_id: str, current: CurrentUserDep, service: ServiceDep):
+async def remove_member(filter_id: str, user_id: str, service: ServiceDep,
+                        current: Annotated[CurrentUser, Depends(require("filter.member.remove"))]):
     return {"items": await service.remove_member(filter_id, current.id, user_id)}

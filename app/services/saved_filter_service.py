@@ -58,21 +58,27 @@ class SavedFilterService:
         self.lists = ListRepository(db)
 
     # --- server-side evaluation (Filters results) ---
-    async def _evaluate(self, cards: list[dict[str, Any]], conj: str, user_id: str) -> dict[str, Any]:
-        """Evaluate a rule tree over all tasks and return the matched set plus the small
-        reference data the results table needs (spaces, lists, assignee users) — so the
-        frontend renders everything from ONE response instead of fanning out to several
-        endpoints and filtering in the browser."""
+    async def _evaluate(self, cards: list[dict[str, Any]], conj: str, user_id: str,
+                        skip: int = 0, limit: int = 0) -> dict[str, Any]:
+        """Evaluate a rule tree over all tasks, then return ONLY the requested page of
+        matched tasks (skip/limit) plus the small reference data those page rows need
+        (spaces, lists, assignee users) and the grand `total`. Paginating server-side means
+        clicking Next fetches just the next page instead of shipping every match at once —
+        so a 1000-task filter stays fast. limit<=0 returns all matches (used by callers
+        that don't paginate)."""
         candidates = await self.tasks.list_tasks(
             {"is_deleted": {"$ne": True}, "is_archived": {"$ne": True}},
             skip=0, limit=_EVAL_TASK_CAP, sort=[("created_at", -1)],
         )
         matched = [t for t in candidates if task_matches(cards or [], conj, t, user_id)]
+        total = len(matched)
+        # Slice the requested page; only these rows are serialized + enriched + returned.
+        page = matched[skip: skip + limit] if limit and limit > 0 else matched[skip:]
 
-        # Reference data limited to what the matched tasks actually reference.
-        space_ids = {t["project_id"] for t in matched if t.get("project_id")}
-        list_ids = {t["list_id"] for t in matched if t.get("list_id")}
-        assignee_ids = {t["assignee_id"] for t in matched if t.get("assignee_id")}
+        # Reference data limited to what the PAGE rows actually reference.
+        space_ids = {t["project_id"] for t in page if t.get("project_id")}
+        list_ids = {t["list_id"] for t in page if t.get("list_id")}
+        assignee_ids = {t["assignee_id"] for t in page if t.get("assignee_id")}
 
         projects = await self.projects.find_many({"_id": {"$in": list(space_ids)}}, limit=1000) if space_ids else []
         lists = await self.lists.find_many({"_id": {"$in": list(list_ids)}}, limit=2000) if list_ids else []
@@ -92,23 +98,26 @@ class SavedFilterService:
                       "avatar_color": u.get("avatar_color"), "avatar_url": u.get("avatar_url")} for u in users]
 
         return {
-            "items": [_task_view(t) for t in matched],
-            "total": len(matched),
+            "items": [_task_view(t) for t in page],
+            "total": total,
+            "skip": skip,
+            "limit": limit,
             "spaces": spaces,
             "lists": lists_out,
             "users": users_out,
         }
 
-    async def evaluate(self, cards: list[dict[str, Any]], conj: str, user_id: str) -> dict[str, Any]:
-        """Evaluate an arbitrary rule tree (used by the live builder preview)."""
-        return await self._evaluate(cards, conj if conj in ("AND", "OR") else "AND", user_id)
+    async def evaluate(self, cards: list[dict[str, Any]], conj: str, user_id: str,
+                       skip: int = 0, limit: int = 0) -> dict[str, Any]:
+        """Evaluate an arbitrary rule tree (used by the live builder preview), paginated."""
+        return await self._evaluate(cards, conj if conj in ("AND", "OR") else "AND", user_id, skip, limit)
 
-    async def results(self, filter_id: str, user_id: str) -> dict[str, Any]:
-        """Load a saved filter AND its evaluated results in a single call."""
+    async def results(self, filter_id: str, user_id: str, skip: int = 0, limit: int = 0) -> dict[str, Any]:
+        """Load a saved filter AND one page of its evaluated results in a single call."""
         doc = await self.repo.get_for_user(filter_id, user_id)
         if not doc:
             raise NotFoundError("Filter not found")
-        payload = await self._evaluate(doc.get("cards", []) or [], doc.get("conj", "AND"), user_id)
+        payload = await self._evaluate(doc.get("cards", []) or [], doc.get("conj", "AND"), user_id, skip, limit)
         payload["filter"] = _serialize(doc)
         return payload
 
