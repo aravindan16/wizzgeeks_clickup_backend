@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import CurrentUserDep, get_user_dashboard_service
+from app.api.deps import CurrentUser, CurrentUserDep, get_user_dashboard_service, require
 from app.schemas.common import MessageResponse
 from app.schemas.user_dashboard import (
     DashboardMemberAdd, DashboardMemberList,
@@ -54,10 +54,12 @@ async def list_members(dashboard_id: str, current: CurrentUserDep, service: Serv
 
 
 @router.post("/{dashboard_id}/members", response_model=DashboardMemberList)
-async def add_member(dashboard_id: str, payload: DashboardMemberAdd, current: CurrentUserDep, service: ServiceDep):
+async def add_member(dashboard_id: str, payload: DashboardMemberAdd, service: ServiceDep,
+                     current: Annotated[CurrentUser, Depends(require("dashboard.member.add"))]):
     return {"items": await service.add_member(dashboard_id, current.id, member_user_id=payload.user_id)}
 
 
 @router.delete("/{dashboard_id}/members/{user_id}", response_model=DashboardMemberList)
-async def remove_member(dashboard_id: str, user_id: str, current: CurrentUserDep, service: ServiceDep):
+async def remove_member(dashboard_id: str, user_id: str, service: ServiceDep,
+                        current: Annotated[CurrentUser, Depends(require("dashboard.member.remove"))]):
     return {"items": await service.remove_member(dashboard_id, current.id, user_id)}

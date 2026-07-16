@@ -29,7 +29,7 @@ DONE_STATUSES = ["completed", "closed"]
 
 
 def _serialize(project: dict[str, Any], member_count: int | None = None,
-               owner_name: str | None = None) -> dict[str, Any]:
+               owner_name: str | None = None, owner: dict[str, Any] | None = None) -> dict[str, Any]:
     out = dict(project)
     out["_id"] = str(project["_id"])
     if project.get("owner_id"):
@@ -38,6 +38,10 @@ def _serialize(project: dict[str, Any], member_count: int | None = None,
         out["member_count"] = member_count
     if owner_name is not None:
         out["owner_name"] = owner_name
+    # Owner's real avatar colour/url so the Lead avatar matches them everywhere.
+    if owner is not None:
+        out["owner_avatar_color"] = owner.get("avatar_color")
+        out["owner_avatar_url"] = owner.get("avatar_url")
     # Always expose a status workflow (legacy fallback for pre-feature spaces).
     out["statuses"] = statuses_for(project)
     return out
@@ -192,16 +196,17 @@ class ProjectService:
 
         items = await self.projects.list_projects(query, skip=skip, limit=limit)
         total = await self.projects.count(query)
-        # Resolve owner (lead) names in one batch.
+        # Resolve owner (lead) name + avatar in one batch.
         owner_ids = [p["owner_id"] for p in items if p.get("owner_id")]
         owners = await self.users.find_many({"_id": {"$in": owner_ids}}, limit=500,
-                                            projection={"full_name": 1}) if owner_ids else []
-        names = {str(u["_id"]): u.get("full_name") for u in owners}
+                                            projection={"full_name": 1, "avatar_color": 1, "avatar_url": 1}) if owner_ids else []
+        by_id = {str(u["_id"]): u for u in owners}
         out = []
         for p in items:
             count = await self.members.count_active_by_project(str(p["_id"]))
+            owner = by_id.get(str(p.get("owner_id")))
             out.append(_serialize(p, member_count=count,
-                                  owner_name=names.get(str(p.get("owner_id")))))
+                                  owner_name=(owner or {}).get("full_name"), owner=owner))
         return out, total
 
     async def update_project(
@@ -270,6 +275,8 @@ class ProjectService:
         project = await self._get_or_404(project_id)
         if not await self._can_manage_members(project_id, project, actor):
             raise PermissionDeniedError("You must be a member of this space to add members")
+        if not (actor.has("project.member.add") or actor.has("project.member.manage")):
+            raise PermissionDeniedError("You don't have permission to add space members")
 
         # Resolve an email to an existing user (server-side — works even when the
         # caller can't browse the user directory).
@@ -337,6 +344,8 @@ class ProjectService:
         project = await self._get_or_404(project_id)
         if not await self._can_manage_members(project_id, project, actor):
             raise PermissionDeniedError("You must be a member of this space to manage members")
+        if not (actor.has("project.member.remove") or actor.has("project.member.manage")):
+            raise PermissionDeniedError("You don't have permission to remove space members")
         removed = await self.members.remove(project_id, user_id, utcnow())
         if not removed:
             raise NotFoundError("Member not found in project")

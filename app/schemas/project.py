@@ -50,6 +50,8 @@ class ProjectResponse(ORMModel):
     status: str
     owner_id: str | None = None
     owner_name: str | None = None
+    owner_avatar_color: str | None = None
+    owner_avatar_url: str | None = None
     start_date: str | None = None
     end_date: str | None = None
     member_count: int | None = None

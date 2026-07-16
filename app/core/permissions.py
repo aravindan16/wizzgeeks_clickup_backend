@@ -60,6 +60,14 @@ PERMISSION_CATALOG: list[dict] = [
         {"key": "view.update", "label": "Edit views"},
         {"key": "view.delete", "label": "Delete views"},
     ]},
+    {"key": "members", "module": "Members (add / remove people)", "permissions": [
+        {"key": "project.member.add", "label": "Add space members"},
+        {"key": "project.member.remove", "label": "Remove space members"},
+        {"key": "dashboard.member.add", "label": "Add dashboard members"},
+        {"key": "dashboard.member.remove", "label": "Remove dashboard members"},
+        {"key": "filter.member.add", "label": "Add filter members"},
+        {"key": "filter.member.remove", "label": "Remove filter members"},
+    ]},
     {"key": "comments", "module": "Comments", "permissions": [
         {"key": "comment.create", "label": "Create comments"},
         {"key": "comment.read", "label": "View comments"},
@@ -111,6 +119,7 @@ EMPLOYEE_PERMS = sorted(set(
     + ["task.create", "task.read", "task.update", "task.status.update",
        "task.priority.update", "task.assign", "task.comment", "task.attachments"]
     + ["comment.create", "comment.update", "comment.delete"]
+    + _module("members")  # add/remove members on their own spaces / dashboards / filters
     + ["report.view.self"]
 ))
 

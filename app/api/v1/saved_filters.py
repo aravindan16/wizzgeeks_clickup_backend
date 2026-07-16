@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import CurrentUserDep, get_saved_filter_service
+from app.api.deps import CurrentUser, CurrentUserDep, get_saved_filter_service, require
 from app.schemas.common import MessageResponse
 from app.schemas.saved_filter import (
     FilterEvaluate, FilterMemberAdd, FilterMemberList,
@@ -69,10 +69,12 @@ async def list_members(filter_id: str, current: CurrentUserDep, service: Service
 
 
 @router.post("/{filter_id}/members", response_model=FilterMemberList)
-async def add_member(filter_id: str, payload: FilterMemberAdd, current: CurrentUserDep, service: ServiceDep):
+async def add_member(filter_id: str, payload: FilterMemberAdd, service: ServiceDep,
+                     current: Annotated[CurrentUser, Depends(require("filter.member.add"))]):
     return {"items": await service.add_member(filter_id, current.id, member_user_id=payload.user_id)}
 
 
 @router.delete("/{filter_id}/members/{user_id}", response_model=FilterMemberList)
-async def remove_member(filter_id: str, user_id: str, current: CurrentUserDep, service: ServiceDep):
+async def remove_member(filter_id: str, user_id: str, service: ServiceDep,
+                        current: Annotated[CurrentUser, Depends(require("filter.member.remove"))]):
     return {"items": await service.remove_member(filter_id, current.id, user_id)}
