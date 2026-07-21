@@ -91,6 +91,12 @@ async def upload_my_avatar(
     return await service.set_avatar(current.id, url)
 
 
+@router.delete("/me/avatar", response_model=UserResponse)
+async def remove_my_avatar(current: CurrentUserDep, service: UserServiceDep):
+    """Clear the current user's profile picture (revert to initials)."""
+    return await service.set_avatar(current.id, None)
+
+
 # --- admin user management ---
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
