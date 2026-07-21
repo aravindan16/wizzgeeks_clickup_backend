@@ -247,7 +247,7 @@ class UserService:
         updated.pop("password_hash", None)
         return _serialize(updated, await self._role_keys_for(updated.get("role_ids", [])))
 
-    async def set_avatar(self, user_id: str, avatar_url: str) -> dict[str, Any]:
+    async def set_avatar(self, user_id: str, avatar_url: str | None) -> dict[str, Any]:
         user = await self.users.find_safe_by_id(user_id)
         if not user or user.get("is_deleted"):
             raise NotFoundError("User not found")
