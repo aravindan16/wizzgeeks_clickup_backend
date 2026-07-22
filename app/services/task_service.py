@@ -147,14 +147,38 @@ class TaskService:
         cf[fid] = cur
         await self.tasks.update_by_id(other_id, {"custom_fields": cf, "updated_at": utcnow()})
 
+    async def _actor_display(self, actor: ActorContext) -> dict[str, Any]:
+        """Denormalize the acting user's name/avatar onto notifications (card display)."""
+        u = await self.users.find_safe_by_id(actor.user_id) if actor.user_id else None
+        return {
+            "actor_id": actor.user_id,
+            "actor_name": u.get("full_name") if u else None,
+            "actor_avatar_url": u.get("avatar_url") if u else None,
+            "actor_avatar_color": u.get("avatar_color") if u else None,
+        }
+
     async def _notify_assignee(self, assignee_id: str, actor: ActorContext, task: dict[str, Any]) -> None:
         if not assignee_id or assignee_id == actor.user_id:
             return  # don't notify self-assignments
+        disp = await self._actor_display(actor)
+        name = disp.get("actor_name") or "Someone"
         await self.notifications.notify(
             recipient_id=assignee_id, type="task.assigned",
-            title=f"Task assigned: {task.get('key')}",
+            title=f"{name} assigned you a task",
             body=task.get("title"), entity_type="task", entity_id=str(task["_id"]),
+            entity_key=task.get("key"), entity_title=task.get("title"), **disp,
         )
+
+    def _task_audience(self, task: dict[str, Any]) -> set[str]:
+        """Reporter + assignee + watchers — the people who care about a task's changes."""
+        ids: set[str] = set()
+        for key in ("reporter_id", "assignee_id"):
+            if task.get(key):
+                ids.add(str(task[key]))
+        for w in (task.get("watchers") or []):
+            if w:
+                ids.add(str(w))
+        return ids
 
     # --- access control ---
     async def _assert_project_access(self, project_id: str, actor: ActorContext) -> None:
@@ -401,6 +425,14 @@ class TaskService:
         })
         await self.audit.log(actor_id=actor.user_id, action="task.status_changed", entity_type="task",
                              entity_id=task_id, metadata={"from": from_status, "to": to_status}, ip=actor.ip)
+        # Notify everyone watching this task (reporter, assignee, watchers) except the actor.
+        disp = await self._actor_display(actor)
+        await self.notifications.notify_many(
+            self._task_audience(task), exclude=actor.user_id, type="task.status_changed",
+            title=f"Status changed · {task.get('key')}", body=f"{from_status} → {to_status}",
+            entity_type="task", entity_id=task_id,
+            entity_key=task.get("key"), entity_title=task.get("title"), **disp,
+        )
         return _serialize(updated)
 
     # --- assignment ---

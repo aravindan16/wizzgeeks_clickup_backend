@@ -306,11 +306,14 @@ class ProjectService:
         # Notify the added user (skip self-adds, e.g. the owner on space creation).
         if user_id != actor.user_id:
             role_label = ROLE_LABELS.get(project_role, project_role)
+            actor_user = await self.users.find_safe_by_id(actor.user_id) if actor.user_id else None
+            actor_name = (actor_user or {}).get("full_name") or "Someone"
             await self.notifications.notify(
                 recipient_id=user_id, type="project.member_added",
-                title=f"You were added to {project['name']}",
+                title=f"{actor_name} added you to {project['name']}",
                 body=f"You joined the space as {role_label}.",
                 entity_type="project", entity_id=project_id,
+                **NotificationService.actor_fields(actor.user_id, actor_user),
             )
         return self._member_view(member, user)
 
@@ -332,11 +335,14 @@ class ProjectService:
         # Notify the member that their role/permissions changed.
         if user_id != actor.user_id:
             role_label = ROLE_LABELS.get(project_role, project_role)
+            actor_user = await self.users.find_safe_by_id(actor.user_id) if actor.user_id else None
+            actor_name = (actor_user or {}).get("full_name") or "Someone"
             await self.notifications.notify(
                 recipient_id=user_id, type="project.role_changed",
-                title=f"Your role changed in {project['name']}",
+                title=f"{actor_name} changed your role in {project['name']}",
                 body=f"You are now a {role_label}.",
                 entity_type="project", entity_id=project_id,
+                **NotificationService.actor_fields(actor.user_id, actor_user),
             )
         return self._member_view(updated, user)
 

@@ -1,4 +1,5 @@
 """Comment business logic for tasks, with ownership enforcement."""
+import re
 from typing import Any
 
 from app.core.exceptions import NotFoundError, PermissionDeniedError
@@ -7,8 +8,21 @@ from app.repositories.comment_repository import CommentRepository
 from app.repositories.task_repository import TaskRepository
 from app.repositories.user_repository import UserRepository
 from app.services.audit_service import AuditService
+from app.services.notification_service import NotificationService
 from app.services.user_service import ActorContext
 from app.utils.datetime import utcnow
+
+# Rich mentions are encoded as `@[Full Name](userId)` in the comment body.
+_MENTION_RE = re.compile(r"@\[[^\]]+\]\(([0-9a-fA-F]{24})\)")
+
+
+def _parse_mentions(body: str) -> list[str]:
+    """Extract mentioned user ids from `@[Name](userId)` tokens (deduped, order-preserving)."""
+    out: list[str] = []
+    for uid in _MENTION_RE.findall(body or ""):
+        if uid not in out:
+            out.append(uid)
+    return out
 
 
 def _serialize(c: dict[str, Any], author_name: str | None = None) -> dict[str, Any]:
@@ -31,11 +45,13 @@ class CommentService:
         tasks: TaskRepository,
         users: UserRepository,
         audit: AuditService,
+        notifications: NotificationService | None = None,
     ):
         self.comments = comments
         self.tasks = tasks
         self.users = users
         self.audit = audit
+        self.notifications = notifications
 
     async def _task_or_404(self, task_id: str) -> dict[str, Any]:
         if not is_valid_object_id(task_id):
@@ -55,14 +71,15 @@ class CommentService:
         return [_serialize(r, names.get(str(r["author_id"]))) for r in rows]
 
     async def add_comment(self, task_id: str, body: str, actor: ActorContext) -> dict[str, Any]:
-        await self._task_or_404(task_id)
+        task = await self._task_or_404(task_id)
         now = utcnow()
+        mentions = _parse_mentions(body)
         doc = {
             "entity_type": "task",
             "entity_id": to_object_id(task_id),
             "author_id": to_object_id(actor.user_id),
             "body": body,
-            "mentions": [],
+            "mentions": [to_object_id(m) for m in mentions],
             "parent_comment_id": None,
             "is_edited": False,
             "is_deleted": False,
@@ -74,7 +91,34 @@ class CommentService:
         await self.audit.log(actor_id=actor.user_id, action="comment.created", entity_type="task",
                              entity_id=task_id, metadata={"comment_id": str(created["_id"])}, ip=actor.ip)
         user = await self.users.find_safe_by_id(actor.user_id)
+        await self._notify_comment(task, body, mentions, actor, user)
         return _serialize(created, user.get("full_name") if user else None)
+
+    async def _notify_comment(self, task, body, mentions, actor, actor_user) -> None:
+        if not self.notifications:
+            return
+        disp = {
+            "actor_id": actor.user_id,
+            "actor_name": actor_user.get("full_name") if actor_user else None,
+            "actor_avatar_url": actor_user.get("avatar_url") if actor_user else None,
+            "actor_avatar_color": actor_user.get("avatar_color") if actor_user else None,
+        }
+        name = disp.get("actor_name") or "Someone"
+        preview = (body or "").strip()
+        if len(preview) > 140:
+            preview = preview[:140] + "…"
+        common = dict(entity_type="task", entity_id=str(task["_id"]),
+                      entity_key=task.get("key"), entity_title=task.get("title"), **disp)
+        # Mentioned users get an explicit mention notification.
+        await self.notifications.notify_many(
+            mentions, exclude=actor.user_id, type="comment.mention",
+            title=f"{name} mentioned you", body=preview, **common)
+        # Reporter + assignee (who aren't already mentioned or the author) get a comment notification.
+        audience = {str(task[k]) for k in ("reporter_id", "assignee_id") if task.get(k)}
+        audience -= set(mentions)
+        await self.notifications.notify_many(
+            audience, exclude=actor.user_id, type="comment.added",
+            title=f"{name} commented · {task.get('key')}", body=preview, **common)
 
     async def _get_owned_or_elevated(self, comment_id: str, actor: ActorContext,
                                      *, for_delete: bool) -> dict[str, Any]:

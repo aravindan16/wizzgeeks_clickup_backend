@@ -197,8 +197,9 @@ def get_comment_service(
     tasks: Annotated[TaskRepository, Depends(get_task_repo)],
     users: Annotated[UserRepository, Depends(get_user_repo)],
     audit: Annotated[AuditService, Depends(get_audit_service)],
+    notifications: Annotated[NotificationService, Depends(get_notification_service)],
 ) -> CommentService:
-    return CommentService(comments, tasks, users, audit)
+    return CommentService(comments, tasks, users, audit, notifications)
 
 
 def get_user_dashboard_service(db: DbDep) -> UserDashboardService:
