@@ -101,16 +101,6 @@ class LinkResponse(BaseModel):
     task_type: str | None = None
 
 
-class WorklogResponse(ORMModel):
-    id: str = Field(alias="_id")
-    task_id: str
-    user_id: str | None = None
-    user_name: str | None = None
-    hours: float
-    note: str | None = None
-    created_at: Any | None = None
-
-
 class ActivityResponse(ORMModel):
     id: str = Field(alias="_id")
     actor_id: str | None = None
@@ -135,11 +125,6 @@ class AssignRequest(BaseModel):
 
 class WatcherRequest(BaseModel):
     user_id: str
-
-
-class WorklogRequest(BaseModel):
-    hours: float = Field(gt=0, le=1000)
-    note: str | None = Field(default=None, max_length=1000)
 
 
 class CommentCreate(BaseModel):

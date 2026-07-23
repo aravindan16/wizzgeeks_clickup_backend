@@ -16,9 +16,10 @@ class UserPublic(ORMModel):
     roles: list[str] = []
     permissions: list[str] = []
     status: str
-    designation: str | None = None
-    department: str | None = None
     avatar_url: str | None = None
+    avatar_color: str | None = None
+    theme: str | None = None     # 'light' | 'dark' | 'auto'
+    accent: str | None = None    # accent colour key
 
 
 class TokenResponse(BaseModel):

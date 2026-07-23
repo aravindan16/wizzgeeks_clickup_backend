@@ -6,7 +6,7 @@ from pydantic import BaseModel, EmailStr, Field
 from app.schemas.common import ORMModel
 
 ProjectStatus = Literal["active", "on_hold", "completed", "archived"]
-ProjectRole = Literal["project_manager", "team_lead", "developer", "tester"]
+ProjectRole = Literal["super_admin", "admin", "employee"]
 StatusGroup = Literal["not_started", "active", "done", "closed"]
 
 
@@ -35,7 +35,7 @@ class SaveTemplateRequest(BaseModel):
 class ProjectUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
-    icon: str | None = Field(default=None, max_length=16)  # emoji shown instead of the initial
+    icon: str | None = Field(default=None, max_length=64)  # "FaRocket|#7c3aed" (icon + colour) or emoji
     status: ProjectStatus | None = None
     start_date: str | None = None
     end_date: str | None = None
@@ -50,6 +50,8 @@ class ProjectResponse(ORMModel):
     status: str
     owner_id: str | None = None
     owner_name: str | None = None
+    owner_avatar_color: str | None = None
+    owner_avatar_url: str | None = None
     start_date: str | None = None
     end_date: str | None = None
     member_count: int | None = None
@@ -62,7 +64,7 @@ class MemberAdd(BaseModel):
     # Add by user_id (picked from a list) OR by email (resolved server-side).
     user_id: str | None = None
     email: EmailStr | None = None
-    project_role: ProjectRole = "developer"
+    project_role: ProjectRole = "employee"
 
 
 class MemberResponse(ORMModel):
@@ -70,6 +72,8 @@ class MemberResponse(ORMModel):
     user_id: str
     full_name: str | None = None
     email: str | None = None
+    avatar_color: str | None = None
+    avatar_url: str | None = None
     project_role: str
     added_at: Any | None = None
 

@@ -11,6 +11,7 @@ from app.core.statuses import SYSTEM_TEMPLATES, normalize_statuses, statuses_for
 from app.repositories.base import is_valid_object_id, to_object_id
 from app.repositories.project_member_repository import ProjectMemberRepository
 from app.repositories.project_repository import ProjectRepository
+from app.repositories.space_role_repository import SpaceRoleRepository
 from app.repositories.status_template_repository import StatusTemplateRepository
 from app.repositories.user_repository import UserRepository
 from app.services.audit_service import AuditService
@@ -20,8 +21,7 @@ from app.utils.datetime import utcnow
 
 # Project-member role keys → friendly label for notifications.
 ROLE_LABELS = {
-    "project_manager": "Project Manager", "team_lead": "Team Lead",
-    "developer": "Developer", "tester": "Tester",
+    "super_admin": "Super Admin", "admin": "Admin", "employee": "Employee",
 }
 
 # Tasks considered "done" for progress calculations.
@@ -29,7 +29,7 @@ DONE_STATUSES = ["completed", "closed"]
 
 
 def _serialize(project: dict[str, Any], member_count: int | None = None,
-               owner_name: str | None = None) -> dict[str, Any]:
+               owner_name: str | None = None, owner: dict[str, Any] | None = None) -> dict[str, Any]:
     out = dict(project)
     out["_id"] = str(project["_id"])
     if project.get("owner_id"):
@@ -38,6 +38,10 @@ def _serialize(project: dict[str, Any], member_count: int | None = None,
         out["member_count"] = member_count
     if owner_name is not None:
         out["owner_name"] = owner_name
+    # Owner's real avatar colour/url so the Lead avatar matches them everywhere.
+    if owner is not None:
+        out["owner_avatar_color"] = owner.get("avatar_color")
+        out["owner_avatar_url"] = owner.get("avatar_url")
     # Always expose a status workflow (legacy fallback for pre-feature spaces).
     out["statuses"] = statuses_for(project)
     return out
@@ -52,6 +56,7 @@ class ProjectService:
         audit: AuditService,
         notifications: NotificationService,
         status_templates: "StatusTemplateRepository | None" = None,
+        space_roles: "SpaceRoleRepository | None" = None,
     ):
         self.projects = projects
         self.members = members
@@ -59,6 +64,7 @@ class ProjectService:
         self.audit = audit
         self.notifications = notifications
         self.status_templates = status_templates
+        self.space_roles = space_roles
 
     async def _get_or_404(self, project_id: str) -> dict[str, Any]:
         if not is_valid_object_id(project_id):
@@ -102,7 +108,7 @@ class ProjectService:
         if actor.user_id:
             await self.members.add(
                 project_id=pid, user_id=actor.user_id,
-                project_role="project_manager", added_by=actor.user_id, added_at=now,
+                project_role="admin", added_by=actor.user_id, added_at=now,
             )
 
         await self.audit.log(
@@ -147,8 +153,12 @@ class ProjectService:
 
     @staticmethod
     def _can_see_all(actor: ActorContext) -> bool:
-        """Admins/super-admins (those who can delete projects) see every space."""
-        return actor.has("project.delete")
+        """Space visibility is STRICTLY membership-based for EVERYONE — including admins
+        and super admins. A space is only visible to the user who created it (its owner)
+        or an active member; nobody sees a space they neither created nor belong to.
+        Roles' project.* permissions grant the ABILITY to act, but membership decides
+        WHICH spaces are visible."""
+        return False
 
     async def _can_view(self, project: dict[str, Any], actor: ActorContext) -> bool:
         if self._can_see_all(actor) or self._is_owner(project, actor):
@@ -186,16 +196,17 @@ class ProjectService:
 
         items = await self.projects.list_projects(query, skip=skip, limit=limit)
         total = await self.projects.count(query)
-        # Resolve owner (lead) names in one batch.
+        # Resolve owner (lead) name + avatar in one batch.
         owner_ids = [p["owner_id"] for p in items if p.get("owner_id")]
         owners = await self.users.find_many({"_id": {"$in": owner_ids}}, limit=500,
-                                            projection={"full_name": 1}) if owner_ids else []
-        names = {str(u["_id"]): u.get("full_name") for u in owners}
+                                            projection={"full_name": 1, "avatar_color": 1, "avatar_url": 1}) if owner_ids else []
+        by_id = {str(u["_id"]): u for u in owners}
         out = []
         for p in items:
             count = await self.members.count_active_by_project(str(p["_id"]))
+            owner = by_id.get(str(p.get("owner_id")))
             out.append(_serialize(p, member_count=count,
-                                  owner_name=names.get(str(p.get("owner_id")))))
+                                  owner_name=(owner or {}).get("full_name"), owner=owner))
         return out, total
 
     async def update_project(
@@ -264,6 +275,8 @@ class ProjectService:
         project = await self._get_or_404(project_id)
         if not await self._can_manage_members(project_id, project, actor):
             raise PermissionDeniedError("You must be a member of this space to add members")
+        if not (actor.has("project.member.add") or actor.has("project.member.manage")):
+            raise PermissionDeniedError("You don't have permission to add space members")
 
         # Resolve an email to an existing user (server-side — works even when the
         # caller can't browse the user directory).
@@ -331,6 +344,8 @@ class ProjectService:
         project = await self._get_or_404(project_id)
         if not await self._can_manage_members(project_id, project, actor):
             raise PermissionDeniedError("You must be a member of this space to manage members")
+        if not (actor.has("project.member.remove") or actor.has("project.member.manage")):
+            raise PermissionDeniedError("You don't have permission to remove space members")
         removed = await self.members.remove(project_id, user_id, utcnow())
         if not removed:
             raise NotFoundError("Member not found in project")
@@ -339,16 +354,77 @@ class ProjectService:
             entity_id=project_id, metadata={"user_id": user_id}, ip=actor.ip,
         )
 
+    # --- custom space roles (Jira-style role management) ---
+    @staticmethod
+    def _serialize_role(doc: dict[str, Any]) -> dict[str, Any]:
+        out = dict(doc)
+        out["_id"] = str(doc["_id"])
+        out["project_id"] = str(doc["project_id"])
+        out["is_system"] = False
+        return out
+
+    async def list_space_roles(self, project_id: str, actor: ActorContext) -> list[dict[str, Any]]:
+        project = await self._get_or_404(project_id)
+        if not await self._can_view(project, actor):
+            raise NotFoundError("Project not found")
+        if not self.space_roles:
+            return []
+        docs = await self.space_roles.list_for_project(project_id)
+        return [self._serialize_role(d) for d in docs]
+
+    async def create_space_role(
+        self, project_id: str, data: dict[str, Any], actor: ActorContext
+    ) -> dict[str, Any]:
+        project = await self._get_or_404(project_id)
+        if not await self._can_manage_members(project_id, project, actor):
+            raise PermissionDeniedError("You must be a member of this space to manage roles")
+        if not self.space_roles:
+            raise ValidationError("Role management is unavailable")
+        doc = {
+            "project_id": to_object_id(project_id),
+            "name": data["name"].strip(),
+            "description": (data.get("description") or "").strip() or None,
+            "permissions": list(dict.fromkeys(data.get("permissions") or [])),
+            "is_deleted": False,
+            "created_at": utcnow(),
+            "updated_at": utcnow(),
+        }
+        created = await self.space_roles.insert_one(doc)
+        await self.audit.log(
+            actor_id=actor.user_id, action="project.role_created", entity_type="project",
+            entity_id=project_id, metadata={"name": doc["name"]}, ip=actor.ip,
+        )
+        return self._serialize_role(created)
+
+    async def delete_space_role(self, project_id: str, role_id: str, actor: ActorContext) -> None:
+        project = await self._get_or_404(project_id)
+        if not await self._can_manage_members(project_id, project, actor):
+            raise PermissionDeniedError("You must be a member of this space to manage roles")
+        if not self.space_roles:
+            raise NotFoundError("Role not found")
+        role = await self.space_roles.find_by_id(role_id)
+        if not role or role.get("is_deleted") or str(role.get("project_id")) != str(to_object_id(project_id)):
+            raise NotFoundError("Role not found")
+        await self.space_roles.soft_delete_by_id(role_id, when=utcnow())
+        await self.audit.log(
+            actor_id=actor.user_id, action="project.role_deleted", entity_type="project",
+            entity_id=project_id, metadata={"role_id": role_id}, ip=actor.ip,
+        )
+
     async def list_members(self, project_id: str, actor: ActorContext) -> list[dict[str, Any]]:
         project = await self._get_or_404(project_id)
         if not await self._can_view(project, actor):
             raise NotFoundError("Project not found")
         members = await self.members.list_active_by_project(project_id)
         user_ids = [m["user_id"] for m in members]
-        users = await self.users.find_many({"_id": {"$in": user_ids}}, limit=500,
-                                           projection={"password_hash": 0})
+        # Only surface members whose user is still active — a deleted/suspended user
+        # must not appear as a ghost row (blank name) here or in the assignee picker.
+        users = await self.users.find_many(
+            {"_id": {"$in": user_ids}, "is_deleted": {"$ne": True}, "status": "active"},
+            limit=500, projection={"password_hash": 0})
         by_id = {str(u["_id"]): u for u in users}
-        return [self._member_view(m, by_id.get(str(m["user_id"]))) for m in members]
+        return [self._member_view(m, by_id[str(m["user_id"])])
+                for m in members if str(m["user_id"]) in by_id]
 
     @staticmethod
     def _member_view(member: dict[str, Any], user: dict[str, Any] | None) -> dict[str, Any]:
@@ -357,6 +433,8 @@ class ProjectService:
             "user_id": str(member["user_id"]),
             "full_name": user.get("full_name") if user else None,
             "email": user.get("email") if user else None,
+            "avatar_color": user.get("avatar_color") if user else None,
+            "avatar_url": user.get("avatar_url") if user else None,
             "project_role": member["project_role"],
             "added_at": member.get("added_at"),
         }

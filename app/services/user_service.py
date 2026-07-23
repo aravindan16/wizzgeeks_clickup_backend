@@ -72,9 +72,6 @@ class UserService:
             "full_name": data["full_name"],
             "role_ids": role_ids,
             "manager_id": to_object_id(manager_id) if manager_id else None,
-            "designation": data.get("designation"),
-            "department": data.get("department"),
-            "timezone": data.get("timezone") or "UTC",
             "avatar_url": None,
             "status": "active",
             "notification_prefs": {"in_app": True, "email": False},
@@ -106,12 +103,10 @@ class UserService:
         return _serialize(user, await self._role_keys_for(user.get("role_ids", [])))
 
     async def list_users(self, *, skip: int, limit: int, status: str | None,
-                         department: str | None, search: str | None) -> tuple[list[dict], int]:
+                         search: str | None) -> tuple[list[dict], int]:
         query: dict[str, Any] = {"is_deleted": {"$ne": True}}
         if status:
             query["status"] = status
-        if department:
-            query["department"] = department
         if search:
             query["$or"] = [
                 {"full_name": {"$regex": search, "$options": "i"}},
@@ -133,10 +128,19 @@ class UserService:
 
         update: dict[str, Any] = {"updated_at": utcnow()}
         changed_fields: list[str] = []
-        for field in ("full_name", "designation", "department", "timezone", "avatar_url"):
+        for field in ("full_name", "avatar_url", "avatar_color"):
             if data.get(field) is not None:
                 update[field] = data[field]
                 changed_fields.append(field)
+
+        if data.get("email") is not None:
+            email = data["email"].strip().lower()
+            if email != user.get("email"):
+                existing = await self.users.find_by_email(email)
+                if existing and str(existing["_id"]) != user_id:
+                    raise ConflictError("A user with this email already exists")
+                update["email"] = email
+                changed_fields.append("email")
 
         role_change: dict[str, Any] | None = None
         if data.get("role_keys") is not None:
@@ -201,17 +205,49 @@ class UserService:
             )
         return _serialize(updated, await self._role_keys_for(updated.get("role_ids", [])))
 
+    async def reset_password(
+        self, user_id: str, new_password: str, actor: ActorContext | None = None
+    ) -> dict[str, Any]:
+        """Admin sets a new password for a user (e.g. they forgot theirs)."""
+        user = await self.users.find_safe_by_id(user_id)
+        if not user or user.get("is_deleted"):
+            raise NotFoundError("User not found")
+        now = utcnow()
+        updated = await self.users.update_by_id(user_id, {
+            "password_hash": hash_password(new_password),
+            "password_changed_at": now,
+            "updated_at": now,
+        })
+        updated.pop("password_hash", None)
+        if actor:
+            await self.audit.log(
+                actor_id=actor.user_id,
+                action="user.password_reset",
+                entity_type="user",
+                entity_id=user_id,
+                metadata={"by": "admin"},
+                ip=actor.ip,
+            )
+        return _serialize(updated, await self._role_keys_for(updated.get("role_ids", [])))
+
     async def set_preferences(self, user_id: str, prefs: dict[str, Any]) -> dict[str, Any]:
         user = await self.users.find_safe_by_id(user_id)
         if not user or user.get("is_deleted"):
             raise NotFoundError("User not found")
-        merged = {**(user.get("notification_prefs") or {}), **prefs}
-        updated = await self.users.update_by_id(
-            user_id, {"notification_prefs": merged, "updated_at": utcnow()})
+        prefs = dict(prefs)
+        # UI theme prefs are stored as top-level fields (returned on UserResponse so the
+        # frontend can restore them on any device); the rest are notification prefs.
+        update: dict[str, Any] = {"updated_at": utcnow()}
+        for key in ("theme", "accent"):
+            if key in prefs:
+                update[key] = prefs.pop(key)
+        if prefs:
+            update["notification_prefs"] = {**(user.get("notification_prefs") or {}), **prefs}
+        updated = await self.users.update_by_id(user_id, update)
         updated.pop("password_hash", None)
         return _serialize(updated, await self._role_keys_for(updated.get("role_ids", [])))
 
-    async def set_avatar(self, user_id: str, avatar_url: str) -> dict[str, Any]:
+    async def set_avatar(self, user_id: str, avatar_url: str | None) -> dict[str, Any]:
         user = await self.users.find_safe_by_id(user_id)
         if not user or user.get("is_deleted"):
             raise NotFoundError("User not found")

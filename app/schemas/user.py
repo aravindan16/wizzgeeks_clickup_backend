@@ -9,20 +9,22 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     full_name: str = Field(min_length=1, max_length=120)
     role_keys: list[str] = Field(default_factory=lambda: ["employee"])
-    designation: str | None = None
-    department: str | None = None
     manager_id: str | None = None
-    timezone: str | None = "UTC"
 
 
 class UserUpdate(BaseModel):
+    email: EmailStr | None = None
     full_name: str | None = Field(default=None, min_length=1, max_length=120)
     role_keys: list[str] | None = None
-    designation: str | None = None
-    department: str | None = None
     manager_id: str | None = None
-    timezone: str | None = None
     avatar_url: str | None = None
+    avatar_color: str | None = Field(default=None, max_length=9)
+
+
+class AdminPasswordReset(BaseModel):
+    """Admin sets a new password for a user who forgot theirs."""
+
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 class UserResponse(ORMModel):
@@ -31,10 +33,10 @@ class UserResponse(ORMModel):
     full_name: str
     roles: list[str] = []
     status: str
-    designation: str | None = None
-    department: str | None = None
     manager_id: str | None = None
-    timezone: str | None = None
     avatar_url: str | None = None
+    avatar_color: str | None = None
+    theme: str | None = None     # 'light' | 'dark' | 'auto'
+    accent: str | None = None    # accent colour key
     created_at: object | None = None
     updated_at: object | None = None

@@ -17,16 +17,15 @@ from app.repositories.organization_repository import OrganizationMemberRepositor
 from app.repositories.workspace_repository import WorkspaceMemberRepository
 from app.repositories.activity_log_repository import ActivityLogRepository
 from app.repositories.comment_repository import CommentRepository
-from app.repositories.daily_update_repository import DailyUpdateRepository
 from app.repositories.notification_repository import NotificationRepository
 from app.repositories.project_member_repository import ProjectMemberRepository
 from app.repositories.project_repository import ProjectRepository
+from app.repositories.space_role_repository import SpaceRoleRepository
 from app.repositories.role_repository import RoleRepository
 from app.repositories.custom_field_repository import CustomFieldRepository
 from app.repositories.list_repository import ListRepository
 from app.repositories.status_history_repository import StatusHistoryRepository
 from app.repositories.status_template_repository import StatusTemplateRepository
-from app.repositories.worklog_repository import WorklogRepository
 from app.repositories.task_assignment_repository import TaskAssignmentRepository
 from app.repositories.task_repository import TaskRepository
 from app.repositories.token_repository import RefreshTokenRepository
@@ -34,8 +33,6 @@ from app.repositories.user_repository import UserRepository
 from app.services.audit_service import AuditService
 from app.services.auth_service import AuthService
 from app.services.comment_service import CommentService
-from app.services.daily_update_service import DailyUpdateService
-from app.services.dashboard_service import DashboardService
 from app.services.user_dashboard_service import UserDashboardService
 from app.services.saved_filter_service import SavedFilterService
 from app.services.label_service import LabelService
@@ -117,6 +114,10 @@ def get_status_template_repo(db: DbDep) -> StatusTemplateRepository:
     return StatusTemplateRepository(db)
 
 
+def get_space_role_repo(db: DbDep) -> SpaceRoleRepository:
+    return SpaceRoleRepository(db)
+
+
 def get_project_service(
     projects: Annotated[ProjectRepository, Depends(get_project_repo)],
     members: Annotated[ProjectMemberRepository, Depends(get_project_member_repo)],
@@ -124,8 +125,9 @@ def get_project_service(
     audit: Annotated[AuditService, Depends(get_audit_service)],
     notifications: Annotated[NotificationService, Depends(get_notification_service)],
     status_templates: Annotated[StatusTemplateRepository, Depends(get_status_template_repo)],
+    space_roles: Annotated[SpaceRoleRepository, Depends(get_space_role_repo)],
 ) -> ProjectService:
-    return ProjectService(projects, members, users, audit, notifications, status_templates)
+    return ProjectService(projects, members, users, audit, notifications, status_templates, space_roles)
 
 
 def get_task_repo(db: DbDep) -> TaskRepository:
@@ -170,10 +172,6 @@ def get_status_history_repo(db: DbDep) -> StatusHistoryRepository:
     return StatusHistoryRepository(db)
 
 
-def get_worklog_repo(db: DbDep) -> WorklogRepository:
-    return WorklogRepository(db)
-
-
 def get_assignment_repo(db: DbDep) -> TaskAssignmentRepository:
     return TaskAssignmentRepository(db)
 
@@ -187,11 +185,10 @@ def get_task_service(
     assignments: Annotated[TaskAssignmentRepository, Depends(get_assignment_repo)],
     audit: Annotated[AuditService, Depends(get_audit_service)],
     notifications: Annotated[NotificationService, Depends(get_notification_service)],
-    worklogs: Annotated[WorklogRepository, Depends(get_worklog_repo)],
     lists: Annotated[ListRepository, Depends(get_list_repo)],
     custom_fields: Annotated[CustomFieldRepository, Depends(get_custom_field_repo)],
 ) -> TaskService:
-    return TaskService(tasks, projects, members, users, history, assignments, audit, notifications, worklogs, lists,
+    return TaskService(tasks, projects, members, users, history, assignments, audit, notifications, lists,
                        custom_fields)
 
 
@@ -202,24 +199,6 @@ def get_comment_service(
     audit: Annotated[AuditService, Depends(get_audit_service)],
 ) -> CommentService:
     return CommentService(comments, tasks, users, audit)
-
-
-def get_daily_update_repo(db: DbDep) -> DailyUpdateRepository:
-    return DailyUpdateRepository(db)
-
-
-def get_daily_update_service(
-    updates: Annotated[DailyUpdateRepository, Depends(get_daily_update_repo)],
-    users: Annotated[UserRepository, Depends(get_user_repo)],
-    tasks: Annotated[TaskRepository, Depends(get_task_repo)],
-    audit: Annotated[AuditService, Depends(get_audit_service)],
-    notifications: Annotated[NotificationService, Depends(get_notification_service)],
-) -> DailyUpdateService:
-    return DailyUpdateService(updates, users, tasks, audit, notifications)
-
-
-def get_dashboard_service(db: DbDep) -> DashboardService:
-    return DashboardService(db)
 
 
 def get_user_dashboard_service(db: DbDep) -> UserDashboardService:
@@ -345,15 +324,21 @@ TenantDep = Annotated[TenantContext, Depends(get_tenant_context)]
 
 
 def require(*required_permissions: str):
-    """Dependency factory enforcing that the current user holds ALL given permissions."""
+    """Reusable permission guard (a.k.a. requirePermission). Use as a route
+    dependency: `Depends(require("task.create"))`. Enforces that the current user
+    holds ALL given permissions; otherwise raises 403 with a standard message."""
 
     async def _checker(user: CurrentUserDep) -> CurrentUser:
         for perm in required_permissions:
             if not has_permission(user.permissions, perm):
                 raise PermissionDeniedError(
-                    f"Missing required permission: {perm}",
-                    {"required": list(required_permissions)},
+                    "You do not have permission to perform this action.",
+                    {"required": list(required_permissions), "missing": perm},
                 )
         return user
 
     return _checker
+
+
+# Alias so call sites can read like the RBAC spec.
+require_permission = require

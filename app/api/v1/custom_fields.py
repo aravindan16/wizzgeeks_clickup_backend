@@ -25,7 +25,7 @@ CFServiceDep = Annotated[CustomFieldService, Depends(get_custom_field_service)]
 async def list_fields(
     request: Request,
     service: CFServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("project.read"))],
+    actor: Annotated[CurrentUser, Depends(require("customfield.read"))],
     space_id: str = Query(...),
     list_id: str | None = None,
     task_id: str | None = None,
@@ -41,7 +41,7 @@ async def list_fields(
 async def reusable_fields(
     request: Request,
     service: CFServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("project.read"))],
+    actor: Annotated[CurrentUser, Depends(require("customfield.read"))],
     space_id: str = Query(...),
     list_id: str | None = None,
 ):
@@ -53,7 +53,7 @@ async def create_field(
     payload: CustomFieldCreate,
     request: Request,
     service: CFServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("task.create"))],
+    actor: Annotated[CurrentUser, Depends(require("customfield.create"))],
 ):
     return await service.create_field(payload.model_dump(), make_actor(actor, request))
 
@@ -64,7 +64,7 @@ async def update_field(
     payload: CustomFieldUpdate,
     request: Request,
     service: CFServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("task.create"))],
+    actor: Annotated[CurrentUser, Depends(require("customfield.update"))],
 ):
     return await service.update_field(field_id, payload.model_dump(exclude_unset=True), make_actor(actor, request))
 
@@ -74,7 +74,7 @@ async def reorder_fields(
     payload: ReorderFieldsRequest,
     request: Request,
     service: CFServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("task.create"))],
+    actor: Annotated[CurrentUser, Depends(require("customfield.update"))],
 ):
     await service.reorder_fields(payload.ids, make_actor(actor, request))
     return MessageResponse(message="Custom fields reordered")
@@ -86,7 +86,7 @@ async def toggle_field_for_list(
     payload: ListToggleRequest,
     request: Request,
     service: CFServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("task.create"))],
+    actor: Annotated[CurrentUser, Depends(require("customfield.update"))],
 ):
     """Enable/disable an inherited Space field for one List."""
     await service.set_enabled_for_list(field_id, payload.list_id, payload.enabled, make_actor(actor, request))
@@ -99,7 +99,7 @@ async def move_field(
     payload: MoveFieldRequest,
     request: Request,
     service: CFServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("task.create"))],
+    actor: Annotated[CurrentUser, Depends(require("customfield.update"))],
 ):
     return await service.move_field(field_id, payload.scope, payload.list_id, make_actor(actor, request))
 
@@ -110,7 +110,7 @@ async def duplicate_field(
     payload: DuplicateFieldRequest,
     request: Request,
     service: CFServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("task.create"))],
+    actor: Annotated[CurrentUser, Depends(require("customfield.create"))],
 ):
     return await service.duplicate_field(field_id, payload.scope, payload.space_id, payload.list_id, make_actor(actor, request))
 
@@ -120,7 +120,7 @@ async def delete_field(
     field_id: str,
     request: Request,
     service: CFServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("task.create"))],
+    actor: Annotated[CurrentUser, Depends(require("customfield.delete"))],
 ):
     await service.delete_field(field_id, make_actor(actor, request))
     return MessageResponse(message="Custom field deleted")

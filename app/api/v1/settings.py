@@ -2,14 +2,19 @@
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
-from app.api.deps import CurrentUser, DbDep, require
+from app.api.deps import CurrentUser, CurrentUserDep, DbDep, require
 from app.core.config import settings as app_settings
 from app.repositories.settings_repository import SettingsRepository
 from app.schemas.common import ORMModel
 from app.utils.datetime import utcnow
 
 router = APIRouter()
+
+
+class IconColors(BaseModel):
+    colors: list[str]
 
 DEFAULT_ORG = {
     "org_name": "Wizzgeeks",
@@ -55,6 +60,25 @@ async def update_settings(
     return OrgSettings(**{**DEFAULT_ORG, **(saved or {})})
 
 
+# --- icon-colour palette (DB-driven) ---
+# Readable by any authenticated user — the icon picker is used everywhere.
+@router.get("/icon-colors")
+async def get_icon_colors(db: DbDep, _: CurrentUserDep) -> dict[str, Any]:
+    repo = SettingsRepository(db)
+    return {"colors": await repo.get_icon_colors()}
+
+
+# Editing the palette is an admin action.
+@router.put("/icon-colors")
+async def update_icon_colors(
+    payload: IconColors,
+    db: DbDep,
+    _: Annotated[CurrentUser, Depends(require("admin.settings"))],
+) -> dict[str, Any]:
+    repo = SettingsRepository(db)
+    return {"colors": await repo.set_icon_colors(payload.colors, utcnow())}
+
+
 @router.get("/status")
 async def system_status(
     db: DbDep,
@@ -68,7 +92,7 @@ async def system_status(
         db_ok = False
 
     counts = {}
-    for col in ["users", "projects", "tasks", "daily_updates", "notifications", "activity_logs"]:
+    for col in ["users", "projects", "tasks", "notifications", "activity_logs"]:
         counts[col] = await db[col].count_documents({})
 
     return {

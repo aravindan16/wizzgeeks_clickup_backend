@@ -32,8 +32,6 @@ from app.schemas.task import (
     TaskResponse,
     TaskUpdate,
     WatcherRequest,
-    WorklogRequest,
-    WorklogResponse,
 )
 from app.services.comment_service import CommentService
 from app.services.task_service import TaskService
@@ -138,33 +136,9 @@ async def assign_task(
     payload: AssignRequest,
     request: Request,
     service: TaskServiceDep,
-    # TODO: Re-introduce role-based permission validation in a future phase
-    # (was: Depends(require("task.assign"))). For now any authenticated user
-    # may assign/unassign tasks — only login is required.
-    actor: Annotated[CurrentUser, Depends(get_current_user)],
+    actor: Annotated[CurrentUser, Depends(require("task.assign"))],
 ):
     return await service.assign(task_id, payload.assignee_id, make_actor(actor, request))
-
-
-@router.post("/{task_id}/worklog", response_model=TaskResponse)
-async def log_work(
-    task_id: str,
-    payload: WorklogRequest,
-    request: Request,
-    service: TaskServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("task.update"))],
-):
-    return await service.log_work(task_id, payload.hours, make_actor(actor, request), payload.note)
-
-
-@router.get("/{task_id}/worklogs", response_model=list[WorklogResponse])
-async def list_worklogs(
-    task_id: str,
-    request: Request,
-    service: TaskServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("task.read"))],
-):
-    return await service.list_worklogs(task_id, make_actor(actor, request))
 
 
 # --- subtasks ---
@@ -304,7 +278,9 @@ async def add_comment(
     payload: CommentCreate,
     request: Request,
     service: CommentServiceDep,
-    actor: Annotated[CurrentUser, Depends(require("comment.create"))],
+    # "Comment on tasks" (task.comment) is the toggle users see in the Tasks module,
+    # so gate commenting on that (not the separate comment.create).
+    actor: Annotated[CurrentUser, Depends(require("task.comment"))],
 ):
     return await service.add_comment(task_id, payload.body, make_actor(actor, request))
 

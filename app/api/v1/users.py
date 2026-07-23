@@ -11,7 +11,7 @@ from app.api.deps import CurrentUser, CurrentUserDep, get_user_service, make_act
 from app.core.config import settings
 from app.core.exceptions import ValidationError
 from app.schemas.common import MessageResponse, PaginatedResponse
-from app.schemas.user import UserCreate, UserResponse, UserUpdate
+from app.schemas.user import AdminPasswordReset, UserCreate, UserResponse, UserUpdate
 from app.services.user_service import UserService
 from app.utils.storage import store_avatar
 
@@ -21,6 +21,8 @@ ALLOWED_AVATAR_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "i
 class PreferencesUpdate(BaseModel):
     in_app: bool | None = None
     email: bool | None = None
+    theme: str | None = None    # 'light' | 'dark' | 'auto' — UI appearance
+    accent: str | None = None   # accent/theme colour key (e.g. 'pink')
 
 router = APIRouter()
 
@@ -34,11 +36,10 @@ async def list_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     status: str | None = None,
-    department: str | None = None,
     search: str | None = None,
 ):
     items, total = await service.list_users(
-        skip=skip, limit=limit, status=status, department=department, search=search
+        skip=skip, limit=limit, status=status, search=search
     )
     return PaginatedResponse(items=items, total=total, skip=skip, limit=limit)
 
@@ -90,6 +91,12 @@ async def upload_my_avatar(
     return await service.set_avatar(current.id, url)
 
 
+@router.delete("/me/avatar", response_model=UserResponse)
+async def remove_my_avatar(current: CurrentUserDep, service: UserServiceDep):
+    """Clear the current user's profile picture (revert to initials)."""
+    return await service.set_avatar(current.id, None)
+
+
 # --- admin user management ---
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
@@ -131,6 +138,18 @@ async def activate_user(
     actor: Annotated[CurrentUser, Depends(require("user.update"))],
 ):
     return await service.set_status(user_id, "active", make_actor(actor, request))
+
+
+@router.post("/{user_id}/reset-password", response_model=UserResponse)
+async def reset_user_password(
+    user_id: str,
+    payload: AdminPasswordReset,
+    request: Request,
+    service: UserServiceDep,
+    actor: Annotated[CurrentUser, Depends(require("user.update"))],
+):
+    """Admin resets a user's password (used when a user forgets theirs)."""
+    return await service.reset_password(user_id, payload.new_password, make_actor(actor, request))
 
 
 @router.delete("/{user_id}", response_model=MessageResponse)
