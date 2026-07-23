@@ -18,6 +18,8 @@ from app.repositories.workspace_repository import WorkspaceMemberRepository
 from app.repositories.activity_log_repository import ActivityLogRepository
 from app.repositories.comment_repository import CommentRepository
 from app.repositories.notification_repository import NotificationRepository
+from app.repositories.conversation_repository import ConversationRepository
+from app.repositories.chat_message_repository import ChatMessageRepository
 from app.repositories.project_member_repository import ProjectMemberRepository
 from app.repositories.project_repository import ProjectRepository
 from app.repositories.space_role_repository import SpaceRoleRepository
@@ -37,6 +39,7 @@ from app.services.user_dashboard_service import UserDashboardService
 from app.services.saved_filter_service import SavedFilterService
 from app.services.label_service import LabelService
 from app.services.notification_service import NotificationService
+from app.services.chat_service import ChatService
 from app.services.custom_field_service import CustomFieldService
 from app.services.list_service import ListService
 from app.services.project_service import ProjectService
@@ -91,6 +94,22 @@ def get_notification_service(
     repo: Annotated[NotificationRepository, Depends(get_notification_repo)],
 ) -> NotificationService:
     return NotificationService(repo)
+
+
+def get_conversation_repo(db: DbDep) -> ConversationRepository:
+    return ConversationRepository(db)
+
+
+def get_chat_message_repo(db: DbDep) -> ChatMessageRepository:
+    return ChatMessageRepository(db)
+
+
+def get_chat_service(
+    conversations: Annotated[ConversationRepository, Depends(get_conversation_repo)],
+    messages: Annotated[ChatMessageRepository, Depends(get_chat_message_repo)],
+    users: Annotated[UserRepository, Depends(get_user_repo)],
+) -> ChatService:
+    return ChatService(conversations, messages, users)
 
 
 def get_user_service(
@@ -197,8 +216,9 @@ def get_comment_service(
     tasks: Annotated[TaskRepository, Depends(get_task_repo)],
     users: Annotated[UserRepository, Depends(get_user_repo)],
     audit: Annotated[AuditService, Depends(get_audit_service)],
+    notifications: Annotated[NotificationService, Depends(get_notification_service)],
 ) -> CommentService:
-    return CommentService(comments, tasks, users, audit)
+    return CommentService(comments, tasks, users, audit, notifications)
 
 
 def get_user_dashboard_service(db: DbDep) -> UserDashboardService:

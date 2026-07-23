@@ -178,11 +178,14 @@ class UserService:
             # Notify the user their access/roles changed (skip self-edits).
             if role_change and self.notifications and user_id != actor.user_id:
                 roles_text = ", ".join(role_change["to"]) or "no roles"
+                actor_user = await self.users.find_safe_by_id(actor.user_id) if actor.user_id else None
+                actor_name = (actor_user or {}).get("full_name") or "An admin"
                 await self.notifications.notify(
                     recipient_id=user_id, type="user.role_changed",
-                    title="Your access was updated",
+                    title=f"{actor_name} updated your access",
                     body=f"Your role is now: {roles_text}.",
                     entity_type="user", entity_id=user_id,
+                    **NotificationService.actor_fields(actor.user_id, actor_user),
                 )
         return result
 
