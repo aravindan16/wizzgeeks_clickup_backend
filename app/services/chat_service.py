@@ -13,7 +13,7 @@ from app.repositories.chat_message_repository import ChatMessageRepository
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.user_repository import UserRepository
 from app.utils.datetime import utcnow
-from app.utils.storage import presign_url, store_group_avatar
+from app.utils.storage import delete_object, presign_url, store_group_avatar
 
 
 def _preview(body: str | None, n: int = 120) -> str:
@@ -343,8 +343,17 @@ class ChatService:
         msg, conv = await self._require_message(message_id, user_id)
         if str(msg["sender_id"]) != user_id:
             raise PermissionDeniedError("You can only delete your own messages")
+        # Remove the stored attachment from the DB, and delete the S3 object too —
+        # but only when no other live message still references it (forwarded copies
+        # share the same stored URL, so we must not orphan them).
+        att = msg.get("attachment") or {}
+        att_url = att.get("url")
+        if att_url:
+            others = await self.messages.count_referencing_attachment(att_url, message_id)
+            if others == 0:
+                delete_object(att_url)
         updated = await self.messages.update_by_id(message_id, {
-            "is_deleted": True, "deleted_at": utcnow(), "body": None,
+            "is_deleted": True, "deleted_at": utcnow(), "body": None, "attachment": None,
             "reactions": {}, "reply_to": None, "forwarded_from": None,
             "pinned": False, "bookmarked_by": [],
         })
@@ -358,15 +367,18 @@ class ChatService:
         if msg.get("is_deleted"):
             raise ValidationError("Cannot react to a deleted message")
         reactions = dict(msg.get("reactions") or {})
-        users = list(reactions.get(emoji, []))
-        if user_id in users:
-            users.remove(user_id)
-        else:
-            users.append(user_id)
-        if users:
-            reactions[emoji] = users
-        else:
-            reactions.pop(emoji, None)
+        had_same = user_id in reactions.get(emoji, [])
+        # One reaction per person: drop this user from every emoji first…
+        for e in list(reactions.keys()):
+            if user_id in reactions[e]:
+                remaining = [u for u in reactions[e] if u != user_id]
+                if remaining:
+                    reactions[e] = remaining
+                else:
+                    reactions.pop(e, None)
+        # …then set the new one, unless they clicked the same emoji again (toggle off).
+        if not had_same:
+            reactions[emoji] = reactions.get(emoji, []) + [user_id]
         updated = await self.messages.update_by_id(message_id, {"reactions": reactions})
         return await self._push_updated(conv, updated, user_id)
 
@@ -390,8 +402,18 @@ class ChatService:
         return self._serialize_msg(updated, umap, user_id)
 
     async def mark_read(self, conv_id: str, user_id: str) -> None:
-        await self._require_member(conv_id, user_id)
-        await self.conversations.set_read(conv_id, user_id, utcnow())
+        conv = await self._require_member(conv_id, user_id)
+        now = utcnow()
+        await self.conversations.set_read(conv_id, user_id, now)
+        # Tell the other members in realtime so their "Seen" receipt updates immediately.
+        try:
+            payload = {"event": "chat.read",
+                       "data": {"conversation_id": conv_id, "user_id": user_id, "at": now.isoformat()}}
+            for m in conv.get("member_ids", []):
+                if str(m) != user_id:
+                    await hub.push(str(m), payload)
+        except Exception:  # noqa: BLE001
+            pass
 
     # --- realtime ---
     async def _push(self, conv: dict[str, Any], event: str, msg: dict[str, Any]) -> None:

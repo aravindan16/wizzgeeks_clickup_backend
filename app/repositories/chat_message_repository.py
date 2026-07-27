@@ -41,3 +41,13 @@ class ChatMessageRepository(BaseRepository):
         """A user's saved messages across all conversations (newest first)."""
         return await self.find_many(
             {"bookmarked_by": user_id}, limit=200, sort=[("created_at", -1)])
+
+    async def count_referencing_attachment(self, url: str, exclude_id: str) -> int:
+        """How many *other* non-deleted messages still point at this attachment URL.
+        Used to decide whether the underlying S3 object is safe to delete (forwarded
+        copies share the same stored URL)."""
+        return await self.count({
+            "attachment.url": url,
+            "is_deleted": {"$ne": True},
+            "_id": {"$ne": to_object_id(exclude_id)},
+        })
