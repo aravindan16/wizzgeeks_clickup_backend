@@ -109,6 +109,23 @@ def presign_url(url_or_key: str | None, expires: int = 86400) -> str | None:
         return url_or_key
 
 
+def delete_object(url_or_key: str | None) -> bool:
+    """Delete a stored S3 object by its URL or key. No-op for data URIs / non-S3.
+    Returns True if a delete was issued, False otherwise."""
+    if not url_or_key or url_or_key.startswith("data:") or not s3_configured():
+        return False
+    key = _s3_key(url_or_key)
+    if not key:
+        return False
+    try:
+        _s3_client().delete_object(Bucket=settings.AWS_S3_BUCKET, Key=key)
+        logger.info("Deleted S3 object: %s", key)
+        return True
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to delete S3 object: %s", key, exc_info=True)
+        return False
+
+
 def store_avatar(user_id: str, content: bytes, content_type: str) -> str:
     """Return a URL/URI for the stored avatar."""
     return store_image("avatars", user_id, content, content_type)

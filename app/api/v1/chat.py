@@ -40,6 +40,14 @@ class DirectRequest(BaseModel):
     user_id: str
 
 
+class FavoriteRequest(BaseModel):
+    favorite: bool = True
+
+
+class AddMembersRequest(BaseModel):
+    member_ids: list[str] = Field(min_length=1)
+
+
 class GroupRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     member_ids: list[str] = Field(default_factory=list)
@@ -128,6 +136,16 @@ async def upload_attachment(current: CurrentUserDep, file: UploadFile = File(...
     url = (store_chat_image if is_image else store_chat_file)(current.id, content, ctype)
     return {"url": url, "name": file.filename, "content_type": ctype,
             "size": len(content), "kind": "image" if is_image else "file"}
+
+
+@router.post("/conversations/{conversation_id}/members")
+async def add_group_members(conversation_id: str, payload: AddMembersRequest, current: CurrentUserDep, service: ServiceDep):
+    return await service.add_group_members(conversation_id, current.id, payload.member_ids)
+
+
+@router.post("/conversations/{conversation_id}/favorite")
+async def set_favorite(conversation_id: str, payload: FavoriteRequest, current: CurrentUserDep, service: ServiceDep):
+    return await service.set_favorite(conversation_id, current.id, payload.favorite)
 
 
 @router.post("/conversations/{conversation_id}/avatar")

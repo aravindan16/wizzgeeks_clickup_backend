@@ -53,3 +53,9 @@ class ConversationRepository(BaseRepository):
 
     async def rename(self, conv_id: str, name: str, when: Any) -> dict[str, Any] | None:
         return await self.update_by_id(conv_id, {"name": name, "updated_at": when})
+
+    async def set_favorite(self, conv_id: str, user_id: str, favorite: bool) -> dict[str, Any] | None:
+        """Add/remove the user from a conversation's per-user favourites list."""
+        op = "$addToSet" if favorite else "$pull"
+        await self.collection.update_one({"_id": to_object_id(conv_id)}, {op: {"favorited_by": user_id}})
+        return await self.find_by_id(conv_id)
