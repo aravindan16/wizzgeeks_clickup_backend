@@ -104,6 +104,7 @@ class ChatService:
             "avatar_url": avatar_url,
             "avatar_color": avatar_color,
             "created_by": str(conv["created_by"]) if conv.get("created_by") else None,
+            "favorite": me in (conv.get("favorited_by") or []),
             "member_ids": member_ids,
             "members": members,
             "unread": unread,
@@ -201,6 +202,25 @@ class ChatService:
         updated = await self.conversations.update_by_id(conv_id, {"avatar_url": url, "updated_at": utcnow()})
         umap = await self._user_map([str(m) for m in (updated or conv)["member_ids"]] + [user_id])
         return await self._serialize_conv(updated or conv, user_id, umap)
+
+    async def add_group_members(self, conv_id: str, user_id: str, member_ids: list[str]) -> dict[str, Any]:
+        conv = await self._require_member(conv_id, user_id)
+        if conv.get("type") != "group":
+            raise ValidationError("Only group chats have members")
+        existing = {str(m) for m in conv.get("member_ids", [])}
+        to_add = [m for m in dict.fromkeys(member_ids) if m and m not in existing]
+        await self._assert_users_exist(to_add)
+        if to_add:
+            await self.conversations.add_members(conv_id, to_add, utcnow())
+        updated = await self.conversations.find_by_id(conv_id)
+        umap = await self._user_map([str(m) for m in updated["member_ids"]] + [user_id])
+        return await self._serialize_conv(updated, user_id, umap)
+
+    async def set_favorite(self, conv_id: str, user_id: str, favorite: bool) -> dict[str, Any]:
+        await self._require_member(conv_id, user_id)
+        updated = await self.conversations.set_favorite(conv_id, user_id, favorite)
+        umap = await self._user_map([str(m) for m in updated["member_ids"]] + [user_id])
+        return await self._serialize_conv(updated, user_id, umap)
 
     async def get_conversation(self, conv_id: str, user_id: str) -> dict[str, Any]:
         conv = await self._require_member(conv_id, user_id)
