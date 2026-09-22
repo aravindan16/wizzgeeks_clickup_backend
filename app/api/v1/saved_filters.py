@@ -32,7 +32,8 @@ async def search_users(current: CurrentUserDep, service: ServiceDep, q: str = ""
 @router.post("/evaluate")
 async def evaluate_filter(payload: FilterEvaluate, current: CurrentUserDep, service: ServiceDep,
                           skip: int = 0, limit: int = 0):
-    return await service.evaluate(payload.cards, payload.conj, current.id, skip, limit)
+    return await service.evaluate(payload.cards, payload.conj, current.id, skip, limit,
+                                  payload.date_field, payload.date_from, payload.date_to)
 
 
 @router.post("", response_model=SavedFilterResponse)

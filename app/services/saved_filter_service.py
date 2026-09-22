@@ -19,6 +19,7 @@ from app.repositories.saved_filter_repository import SavedFilterRepository
 from app.repositories.task_repository import TaskRepository
 from app.repositories.user_repository import UserRepository
 from app.services.filter_eval import task_matches
+from app.services.task_service import date_range_filter
 from app.utils.datetime import utcnow
 
 # Upper bound on the candidate task set scanned when evaluating a filter server-side.
@@ -59,7 +60,8 @@ class SavedFilterService:
 
     # --- server-side evaluation (Filters results) ---
     async def _evaluate(self, cards: list[dict[str, Any]], conj: str, user_id: str,
-                        skip: int = 0, limit: int = 0) -> dict[str, Any]:
+                        skip: int = 0, limit: int = 0,
+                        extra_query: dict[str, Any] | None = None) -> dict[str, Any]:
         """Evaluate a rule tree over all tasks, then return ONLY the requested page of
         matched tasks (skip/limit) plus the small reference data those page rows need
         (spaces, lists, assignee users) and the grand `total`. Paginating server-side means
@@ -67,7 +69,7 @@ class SavedFilterService:
         so a 1000-task filter stays fast. limit<=0 returns all matches (used by callers
         that don't paginate)."""
         candidates = await self.tasks.list_tasks(
-            {"is_deleted": {"$ne": True}, "is_archived": {"$ne": True}},
+            {"is_deleted": {"$ne": True}, "is_archived": {"$ne": True}, **(extra_query or {})},
             skip=0, limit=_EVAL_TASK_CAP, sort=[("created_at", -1)],
         )
         matched = [t for t in candidates if task_matches(cards or [], conj, t, user_id)]
@@ -108,9 +110,12 @@ class SavedFilterService:
         }
 
     async def evaluate(self, cards: list[dict[str, Any]], conj: str, user_id: str,
-                       skip: int = 0, limit: int = 0) -> dict[str, Any]:
-        """Evaluate an arbitrary rule tree (used by the live builder preview), paginated."""
-        return await self._evaluate(cards, conj if conj in ("AND", "OR") else "AND", user_id, skip, limit)
+                       skip: int = 0, limit: int = 0, date_field: str | None = None,
+                       date_from: str | None = None, date_to: str | None = None) -> dict[str, Any]:
+        """Evaluate an arbitrary rule tree (used by the live builder preview and Export),
+        paginated, optionally narrowed to a date range."""
+        extra = date_range_filter(date_field or "created_at", date_from, date_to) if (date_from or date_to) else None
+        return await self._evaluate(cards, conj if conj in ("AND", "OR") else "AND", user_id, skip, limit, extra)
 
     async def results(self, filter_id: str, user_id: str, skip: int = 0, limit: int = 0) -> dict[str, Any]:
         """Load a saved filter AND one page of its evaluated results in a single call."""

@@ -61,6 +61,14 @@ async def ensure_indexes() -> None:
         [("project_id", ASCENDING), ("updated_at", DESCENDING)], name="task_recent"
     )
 
+    # time_entries (worklog)
+    await db.time_entries.create_index(
+        [("task_id", ASCENDING), ("work_date", DESCENDING)], name="time_entry_task"
+    )
+    await db.time_entries.create_index(
+        [("user_id", ASCENDING), ("work_date", DESCENDING)], name="time_entry_user"
+    )
+
     # comments
     await db.comments.create_index(
         [("entity_type", ASCENDING), ("entity_id", ASCENDING), ("created_at", ASCENDING)],

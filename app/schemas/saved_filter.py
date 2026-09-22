@@ -15,6 +15,10 @@ class SavedFilterCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     cards: list[dict[str, Any]] = []
     conj: str = "AND"
+    # Optional date range (used by Export): created_at | updated_at | start_date | due_date.
+    date_field: str | None = None
+    date_from: str | None = None
+    date_to: str | None = None
 
 
 class SavedFilterUpdate(BaseModel):
@@ -27,6 +31,10 @@ class FilterEvaluate(BaseModel):
     """Evaluate an ad-hoc rule tree (live builder preview)."""
     cards: list[dict[str, Any]] = []
     conj: str = "AND"
+    # Optional date range (used by Export): created_at | updated_at | start_date | due_date.
+    date_field: str | None = None
+    date_from: str | None = None
+    date_to: str | None = None
 
 
 class SavedFilterResponse(ORMModel):

@@ -1,5 +1,6 @@
 """Task management business logic: CRUD, assignment, workflow transitions,
 watchers, worklog, metrics — with project-member access enforcement."""
+from datetime import datetime, timezone
 from typing import Any
 
 from pymongo.errors import DuplicateKeyError
@@ -10,7 +11,7 @@ from app.core.exceptions import (
     PermissionDeniedError,
     ValidationError,
 )
-from app.core.statuses import default_status_key, status_keys
+from app.core.statuses import default_status_key, status_keys, statuses_for
 from app.core.workflow import (
     BLOCKED,
     DONE_STATUSES,
@@ -304,6 +305,8 @@ class TaskService:
             "created_at": now,
             "updated_at": now,
         }
+        # Created straight into an Active / Done / Closed status → stamp start/end now.
+        doc.update(_auto_status_dates(doc, None, _status_group(status_source, init_status), now))
         created = None
         for _ in range(50):
             try:
@@ -342,6 +345,7 @@ class TaskService:
         status: str | None, assignee_id: str | None, priority: str | None,
         label: str | None, search: str | None, include_archived: bool,
         sort_by: str, sort_dir: int, list_id: str | None = None,
+        date_field: str | None = None, date_from: str | None = None, date_to: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         query: dict[str, Any] = {"is_deleted": {"$ne": True}}
         if not include_archived:
@@ -363,6 +367,8 @@ class TaskService:
                 {"title": {"$regex": search, "$options": "i"}},
                 {"key": {"$regex": search, "$options": "i"}},
             ]
+        if date_from or date_to:
+            query.update(date_range_filter(date_field or "created_at", date_from, date_to))
 
         allowed_sort = {"created_at", "updated_at", "priority", "due_date", "status"}
         sort_field = sort_by if sort_by in allowed_sort else "created_at"
@@ -403,6 +409,8 @@ class TaskService:
         await self._assert_project_access(str(task["project_id"]), actor)
 
         from_status = task["status"]
+        if to_status == from_status:
+            return _serialize(task)  # no-op: don't record a "changed X → X" history entry
         # ClickUp-style free movement. A task in a List with custom statuses validates
         # against that List's workflow; otherwise against the Space's.
         status_source = await self.projects.find_by_id(str(task["project_id"]))
@@ -418,13 +426,17 @@ class TaskService:
             )
 
         now = utcnow()
-        updated = await self.tasks.update_by_id(task_id, {"status": to_status, "updated_at": now})
+        # Auto start/end dates from the status GROUP (works for any custom status name).
+        auto = _auto_status_dates(task, _status_group(status_source, from_status),
+                                  _status_group(status_source, to_status), now)
+        updated = await self.tasks.update_by_id(task_id, {"status": to_status, "updated_at": now, **auto})
         await self.history.record({
             "task_id": to_object_id(task_id), "from_status": from_status, "to_status": to_status,
             "changed_by": actor.user_id, "note": note, "created_at": now,
         })
         await self.audit.log(actor_id=actor.user_id, action="task.status_changed", entity_type="task",
-                             entity_id=task_id, metadata={"from": from_status, "to": to_status}, ip=actor.ip)
+                             entity_id=task_id, metadata={"from": from_status, "to": to_status,
+                                                          **({"auto_dates": auto} if auto else {})}, ip=actor.ip)
         # Notify everyone watching this task (reporter, assignee, watchers) except the actor.
         disp = await self._actor_display(actor)
         await self.notifications.notify_many(
@@ -635,3 +647,74 @@ class TaskService:
             "blocked_tasks": blocked_tasks,
             "overdue_tasks": overdue_tasks,
         }
+
+
+# Datetime fields are stored as BSON dates; start/due are stored as "YYYY-MM-DD" strings.
+_DATETIME_FIELDS = {"created_at", "updated_at"}
+_DATE_STRING_FIELDS = {"start_date", "due_date"}
+
+
+def date_range_filter(field: str, date_from: str | None, date_to: str | None) -> dict[str, Any]:
+    """Inclusive range filter. For created/updated, bounds are ISO datetimes (the client
+    sends local-day boundaries); for start/due, bounds are compared as YYYY-MM-DD strings."""
+    if field not in _DATETIME_FIELDS | _DATE_STRING_FIELDS:
+        raise ValidationError(f"Invalid date_field: {field}")
+    cond: dict[str, Any] = {}
+    for op, raw in (("$gte", date_from), ("$lte", date_to)):
+        if not raw:
+            continue
+        try:
+            value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValidationError(f"Invalid date: {raw}") from exc
+        if field in _DATETIME_FIELDS:
+            cond[op] = value
+        else:
+            day = value.date().isoformat()
+            # "\uffff" keeps any stored "YYYY-MM-DDThh:mm" value on the end day inside the range.
+            cond[op] = day if op == "$gte" else day + "\uffff"
+    return {field: cond}
+
+
+# --- automatic start / end dates from status groups ---
+_FINISHED = ("done", "closed")
+
+
+def _status_group(source: dict[str, Any] | None, key: str | None) -> str | None:
+    """The group (not_started / active / done / closed) of a status key in a Space or List."""
+    for st in statuses_for(source):
+        if st.get("key") == key:
+            return st.get("group")
+    return None
+
+
+def _is_timestamp(value: Any) -> bool:
+    """True for an automatic timestamp ("YYYY-MM-DDTHH:MM:SSZ"), False for a plain date."""
+    return isinstance(value, str) and "T" in value
+
+
+def _auto_status_dates(task: dict[str, Any], from_group: str | None, to_group: str | None,
+                       now: datetime) -> dict[str, Any]:
+    """Start/end date changes implied by moving a task between status groups.
+
+    * into Active            → start_date = now (keeps an earlier automatic start on re-entry;
+                                replaces a manually planned date-only start)
+    * into Done / Closed      → end_date = now (and start_date = now if it never started)
+    * out of Done / Closed back to Active / Not started → clear the automatic end_date
+    Timestamps are UTC ISO strings ("2026-09-21T12:16:05Z"); the UI shows them in local time.
+    """
+    if to_group == from_group or to_group is None:
+        return {}
+    stamp = now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    out: dict[str, Any] = {}
+    if to_group == "active":
+        if not _is_timestamp(task.get("start_date")):
+            out["start_date"] = stamp
+    elif to_group in _FINISHED:
+        if from_group not in _FINISHED:
+            out["end_date"] = stamp
+        if not task.get("start_date"):
+            out["start_date"] = stamp
+    if from_group in _FINISHED and to_group not in _FINISHED and _is_timestamp(task.get("end_date")):
+        out["end_date"] = None  # reopened → no longer finished
+    return out

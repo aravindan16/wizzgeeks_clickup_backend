@@ -7,18 +7,61 @@ raw task documents (ObjectId fields), comparing everything as strings.
 A rule tree is a list of "cards" (groups) joined by a top-level conjunction. Each node is
 either a group ({type:'group', conj:'AND'|'OR', children:[...]}) or a rule
 ({type:'rule', field, op:'is'|'is_not', value}). `value` is an array for multi-select
-fields and a scalar for Space / text custom fields.
+fields, a scalar for Space / text custom fields, and for the date fields (start_date,
+end_date) a range {"from": "YYYY-MM-DD", "to": "YYYY-MM-DD", "tz": <minutes>} where
+either end may be empty and `tz` is the browser's getTimezoneOffset() (so a timestamp is
+bucketed into the user's LOCAL calendar day).
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
+
+DATE_FIELDS = {"start_date", "end_date"}
 
 
 def _rule_active(node: dict[str, Any]) -> bool:
     v = node.get("value")
     if isinstance(v, list):
         return len(v) > 0
+    if isinstance(v, dict):  # date range
+        return bool(v.get("from") or v.get("to"))
     return v not in (None, "")
+
+
+def _task_day(task: dict[str, Any], field: str, tz_minutes: int) -> str | None:
+    """The task's Start / End date as a local "YYYY-MM-DD" (None when unset).
+
+    Values are a plain "YYYY-MM-DD" (picked by hand) or an automatic UTC timestamp
+    ("…T…Z", stamped when the status moved to Active / Done / Closed), which is bucketed
+    into the user's local day. End date falls back to due_date for older tasks.
+    """
+    raw = task.get("start_date") if field == "start_date" else (task.get("end_date") or task.get("due_date"))
+    if not raw:
+        return None
+    raw = str(raw)
+    if "T" in raw:
+        try:
+            ts = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            # getTimezoneOffset() is UTC − local (e.g. −330 for IST) → local = UTC − offset.
+            return (ts.astimezone(timezone.utc) - timedelta(minutes=tz_minutes)).date().isoformat()
+        except ValueError:
+            pass
+    return raw[:10]
+
+
+def _match_date_range(task: dict[str, Any], field: str, value: dict[str, Any]) -> bool:
+    try:
+        tz = int(value.get("tz") or 0)
+    except (TypeError, ValueError):
+        tz = 0
+    day = _task_day(task, field, tz)
+    if not day:
+        return False  # no date → never "in range"
+    lo, hi = value.get("from") or "", value.get("to") or ""
+    return (not lo or day >= lo) and (not hi or day <= hi)
 
 
 def _node_active(node: dict[str, Any]) -> bool:
@@ -51,6 +94,10 @@ def _eval_node(node: dict[str, Any], task: dict[str, Any], me_id: str) -> bool:
             m = any(str(v) in tv_arr for v in value)
         else:  # text — contains
             m = str(value).lower() in str(tv if tv is not None else "").lower()
+        return (not m) if neg else m
+
+    if field in DATE_FIELDS:
+        m = _match_date_range(task, field, value) if isinstance(value, dict) else True
         return (not m) if neg else m
 
     vals = [str(x) for x in value] if isinstance(value, list) else [str(value)]
