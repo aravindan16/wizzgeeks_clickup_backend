@@ -17,6 +17,7 @@ from app.repositories.organization_repository import OrganizationMemberRepositor
 from app.repositories.workspace_repository import WorkspaceMemberRepository
 from app.repositories.activity_log_repository import ActivityLogRepository
 from app.repositories.comment_repository import CommentRepository
+from app.repositories.time_entry_repository import TimeEntryRepository
 from app.repositories.notification_repository import NotificationRepository
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.chat_message_repository import ChatMessageRepository
@@ -35,6 +36,7 @@ from app.repositories.user_repository import UserRepository
 from app.services.audit_service import AuditService
 from app.services.auth_service import AuthService
 from app.services.comment_service import CommentService
+from app.services.time_entry_service import TimeEntryService
 from app.services.user_dashboard_service import UserDashboardService
 from app.services.saved_filter_service import SavedFilterService
 from app.services.label_service import LabelService
@@ -219,6 +221,20 @@ def get_comment_service(
     notifications: Annotated[NotificationService, Depends(get_notification_service)],
 ) -> CommentService:
     return CommentService(comments, tasks, users, audit, notifications)
+
+
+def get_time_entry_repo(db: DbDep) -> TimeEntryRepository:
+    return TimeEntryRepository(db)
+
+
+def get_time_entry_service(
+    entries: Annotated[TimeEntryRepository, Depends(get_time_entry_repo)],
+    tasks: Annotated[TaskRepository, Depends(get_task_repo)],
+    members: Annotated[ProjectMemberRepository, Depends(get_project_member_repo)],
+    users: Annotated[UserRepository, Depends(get_user_repo)],
+    audit: Annotated[AuditService, Depends(get_audit_service)],
+) -> TimeEntryService:
+    return TimeEntryService(entries, tasks, members, users, audit)
 
 
 def get_user_dashboard_service(db: DbDep) -> UserDashboardService:

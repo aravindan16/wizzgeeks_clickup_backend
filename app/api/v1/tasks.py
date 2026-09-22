@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from app.api.deps import (
     CurrentUser,
     get_comment_service,
+    get_time_entry_service,
     get_current_user,
     get_task_service,
     make_actor,
@@ -22,6 +23,8 @@ from app.schemas.task import (
     CommentCreate,
     CommentResponse,
     CommentUpdate,
+    TimeEntryCreate,
+    TimeEntryResponse,
     LinkRequest,
     LinkResponse,
     StatusChangeRequest,
@@ -35,11 +38,13 @@ from app.schemas.task import (
 )
 from app.services.comment_service import CommentService
 from app.services.task_service import TaskService
+from app.services.time_entry_service import TimeEntryService
 
 router = APIRouter()
 
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
 CommentServiceDep = Annotated[CommentService, Depends(get_comment_service)]
+TimeEntryServiceDep = Annotated[TimeEntryService, Depends(get_time_entry_service)]
 
 
 # --- workflow metadata (any authenticated reader) ---
@@ -79,11 +84,15 @@ async def list_tasks(
     include_archived: bool = False,
     sort_by: str = "created_at",
     sort_dir: int = Query(-1, ge=-1, le=1),
+    date_field: str | None = Query(None, description="created_at | updated_at | start_date | due_date"),
+    date_from: str | None = Query(None, description="Inclusive lower bound (ISO date or datetime)"),
+    date_to: str | None = Query(None, description="Inclusive upper bound (ISO date or datetime)"),
 ):
     items, total = await service.list_tasks(
         actor=make_actor(actor_user, request), skip=skip, limit=limit, project_id=project_id,
         list_id=list_id, status=status, assignee_id=assignee_id, priority=priority, label=label,
         search=search, include_archived=include_archived, sort_by=sort_by, sort_dir=(-1 if sort_dir < 0 else 1),
+        date_field=date_field, date_from=date_from, date_to=date_to,
     )
     return PaginatedResponse(items=items, total=total, skip=skip, limit=limit)
 
@@ -305,3 +314,37 @@ async def delete_comment(
 ):
     await service.delete_comment(comment_id, make_actor(actor, request))
     return MessageResponse(message="Comment deleted")
+
+
+# --- time tracking (worklog) ---
+@router.get("/{task_id}/time-entries", response_model=list[TimeEntryResponse])
+async def list_time_entries(
+    task_id: str,
+    request: Request,
+    service: TimeEntryServiceDep,
+    actor: Annotated[CurrentUser, Depends(require("task.read"))],
+):
+    return await service.list_entries(task_id, make_actor(actor, request))
+
+
+@router.post("/{task_id}/time-entries", response_model=TimeEntryResponse, status_code=201)
+async def log_time(
+    task_id: str,
+    payload: TimeEntryCreate,
+    request: Request,
+    service: TimeEntryServiceDep,
+    actor: Annotated[CurrentUser, Depends(require("task.update"))],
+):
+    return await service.log_time(task_id, payload.minutes, payload.work_date, payload.note,
+                                  make_actor(actor, request))
+
+
+@router.delete("/time-entries/{entry_id}", response_model=MessageResponse)
+async def delete_time_entry(
+    entry_id: str,
+    request: Request,
+    service: TimeEntryServiceDep,
+    actor: Annotated[CurrentUser, Depends(require("task.update"))],
+):
+    await service.delete_entry(entry_id, make_actor(actor, request))
+    return MessageResponse(message="Time entry deleted")

@@ -1,4 +1,5 @@
 """Task, comment, history, and metrics DTOs."""
+from datetime import date
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -144,6 +145,23 @@ class CommentResponse(ORMModel):
     is_edited: bool = False
     created_at: Any | None = None
     updated_at: Any | None = None
+
+
+class TimeEntryCreate(BaseModel):
+    minutes: int = Field(ge=1, le=24 * 60)
+    work_date: date
+    note: str | None = Field(default=None, max_length=500)
+
+
+class TimeEntryResponse(ORMModel):
+    id: str = Field(alias="_id")
+    task_id: str
+    user_id: str
+    user_name: str | None = None
+    minutes: int
+    work_date: str
+    note: str | None = None
+    created_at: Any | None = None
 
 
 class StatusHistoryResponse(ORMModel):
